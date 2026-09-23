@@ -799,28 +799,27 @@ app.post(
 
 
                 await connection.execute(
-                    `INSERT INTO files
-                     (user_id,original_name,category,drive_file_id)
-                     VALUES (?,?,?,?)`,
-                    [
-                        userId,
-                        pending.originalFileName,
-                        category,
-                        response.data.id
-                    ]
-                );
+    `INSERT INTO files
+     (user_id, original_name, category, drive_file_id, created_at)
+     VALUES (?, ?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))`,
+    [
+        userId,
+        pending.originalFileName,
+        category,
+        response.data.id
+    ]
+);
 
-
-                await connection.execute(
-                    `INSERT INTO logs
-                     (user_id,category,confidence)
-                     VALUES (?,?,?)`,
-                    [
-                        userId,
-                        category,
-                        confidence
-                    ]
-                );
+await connection.execute(
+    `INSERT INTO logs
+     (user_id, category, confidence, created_at)
+     VALUES (?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))`,
+    [
+        userId,
+        category,
+        confidence
+    ]
+);
 
 
                 await connection.commit();
