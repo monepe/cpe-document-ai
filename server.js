@@ -54,24 +54,72 @@ const CATEGORIES = [
 const APP_DRIVE_FOLDER = 'CPE Document AI';
 const pendingUploads = new Map();
 
+/* =====================================================
+   OCR WORKER POOL
+===================================================== */
+
+const OCR_POOL_SIZE = Math.max(1, Number(process.env.OCR_POOL_SIZE) || 2);
+const ocrWorkers = [];
+const ocrWaiters = [];
+
+async function initOcrPool() {
+    console.log(`⏳ เตรียม OCR workers ${OCR_POOL_SIZE} ตัว...`);
+
+    for (let i = 0; i < OCR_POOL_SIZE; i++)
+        ocrWorkers.push(await createWorker(['tha', 'eng']));
+
+    console.log('✅ OCR workers พร้อมใช้งาน');
+}
+
+async function acquireOcrWorker() {
+    if (ocrWorkers.length) return ocrWorkers.pop();
+    return new Promise(resolve => ocrWaiters.push(resolve));
+}
+
+function releaseOcrWorker(worker) {
+    const waiter = ocrWaiters.shift();
+    if (waiter) waiter(worker);
+    else ocrWorkers.push(worker);
+}
+
+async function recognizeText(source) {
+    const worker = await acquireOcrWorker();
+
+    try {
+        const { data: { text } } = await worker.recognize(source);
+        return text;
+    } finally {
+        releaseOcrWorker(worker);
+    }
+}
+
+/* =====================================================
+   GENERAL
+===================================================== */
+
 function fixThaiFilename(filename) {
     if (!filename) return filename;
 
     try {
         const fixed = Buffer.from(filename, 'latin1').toString('utf8');
-        if (fixed.includes('\uFFFD')) return filename;
-        return fixed;
+        return fixed.includes('\uFFFD') ? filename : fixed;
     } catch {
         return filename;
+    }
+}
+
+function cleanupFile(file) {
+    try {
+        if (file && fs.existsSync(file)) fs.unlinkSync(file);
+    } catch (error) {
+        console.error('ลบไฟล์ไม่สำเร็จ:', error.message);
     }
 }
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-if (process.env.NODE_ENV === 'production') {
-    app.set('trust proxy', 1);
-}
+if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
 
 app.use(session({
     secret: process.env.SESSION_SECRET || 'change-this-session-secret',
@@ -89,49 +137,43 @@ app.use(flash());
 app.use(passport.initialize());
 app.use(passport.session());
 
+/* =====================================================
+   GOOGLE LOGIN
+===================================================== */
+
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((user, done) => done(null, user));
 
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL:
-        process.env.GOOGLE_CALLBACK_URL ||
-        'http://localhost:3000/auth/google/callback'
+    callbackURL: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3000/auth/google/callback'
 }, async (accessToken, refreshToken, profile, done) => {
     try {
         const email = profile.emails?.[0]?.value?.trim().toLowerCase();
 
-        if (!email) {
-            return done(null, false, {
-                message: 'ไม่พบ Gmail จากบัญชี Google นี้'
-            });
-        }
+        if (!email)
+            return done(null, false, { message: 'ไม่พบ Gmail จากบัญชี Google นี้' });
 
         const [rows] = await db.execute(
-            `SELECT id,email,display_name,role
-             FROM users
-             WHERE LOWER(email)=LOWER(?)
-             LIMIT 1`,
+            `SELECT id,email,display_name,role FROM users
+             WHERE LOWER(email)=LOWER(?) LIMIT 1`,
             [email]
         );
 
-        if (!rows.length) {
+        if (!rows.length)
             return done(null, false, {
                 message: 'อีเมลของคุณไม่มีสิทธิ์เข้าใช้งานระบบนี้!'
             });
-        }
 
         const dbUser = rows[0];
 
         await db.execute(
-            `UPDATE users
-             SET google_id=?,
-                 display_name=CASE
-                    WHEN display_name IS NULL OR display_name='' THEN ?
-                    ELSE display_name
-                 END
-             WHERE id=?`,
+            `UPDATE users SET google_id=?,
+             display_name=CASE
+                WHEN display_name IS NULL OR display_name='' THEN ?
+                ELSE display_name
+             END WHERE id=?`,
             [profile.id || null, profile.displayName || email, dbUser.id]
         );
 
@@ -157,17 +199,12 @@ function checkAuth(req, res, next) {
 }
 
 app.get('/auth/google', passport.authenticate('google', {
-    scope: [
-        'profile',
-        'email',
-        'https://www.googleapis.com/auth/drive.file'
-    ],
+    scope: ['profile', 'email', 'https://www.googleapis.com/auth/drive.file'],
     accessType: 'offline',
     prompt: 'consent'
 }));
 
-app.get(
-    '/auth/google/callback',
+app.get('/auth/google/callback',
     passport.authenticate('google', {
         failureRedirect: '/login.html',
         failureFlash: true
@@ -175,11 +212,9 @@ app.get(
     (req, res) => res.redirect('/index.html')
 );
 
-app.get('/api/auth-error', (req, res) => {
-    res.json({
-        error: req.flash('error')[0] || null
-    });
-});
+app.get('/api/auth-error', (req, res) =>
+    res.json({ error: req.flash('error')[0] || null })
+);
 
 app.get('/api/me', checkAuth, (req, res) => {
     res.json({
@@ -187,9 +222,7 @@ app.get('/api/me', checkAuth, (req, res) => {
         user: {
             id: req.user.dbUser?.id,
             email: req.user.dbUser?.email,
-            displayName:
-                req.user.dbUser?.display_name ||
-                req.user.displayName,
+            displayName: req.user.dbUser?.display_name || req.user.displayName,
             role: req.user.dbUser?.role || 'user',
             photo: req.user.photos?.[0]?.value || null
         }
@@ -199,34 +232,31 @@ app.get('/api/me', checkAuth, (req, res) => {
 app.get('/api/logout', (req, res, next) => {
     req.logout(error => {
         if (error) return next(error);
-
-        req.session.destroy(() => {
-            res.redirect('/login.html');
-        });
+        req.session.destroy(() => res.redirect('/login.html'));
     });
 });
 
 app.get('/index.html', checkAuth);
-
-app.get('/', checkAuth, (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+app.get('/', checkAuth, (req, res) =>
+    res.sendFile(path.join(__dirname, 'public', 'index.html'))
+);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+/* =====================================================
+   GOOGLE DRIVE
+===================================================== */
+
 function escapeDriveQuery(value) {
-    return String(value)
-        .replace(/\\/g, '\\\\')
-        .replace(/'/g, "\\'");
+    return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 async function findDriveFolder(name, parentId, drive) {
     const folderName = escapeDriveQuery(name);
 
     let q =
-        `name='${folderName}' ` +
-        `and mimeType='application/vnd.google-apps.folder' ` +
-        `and trashed=false`;
+        `name='${folderName}' and ` +
+        `mimeType='application/vnd.google-apps.folder' and trashed=false`;
 
     q += parentId
         ? ` and '${parentId}' in parents`
@@ -257,35 +287,21 @@ async function createDriveFolder(name, parentId, drive) {
 
 async function getOrCreateDriveFolder(name, parentId, drive) {
     const folder = await findDriveFolder(name, parentId, drive);
-
     if (folder) return folder.id;
 
-    const created = await createDriveFolder(name, parentId, drive);
-    return created.id;
+    return (await createDriveFolder(name, parentId, drive)).id;
 }
 
 async function getUserCategoryFolder(category, drive) {
-    const mainFolder = await getOrCreateDriveFolder(
-        APP_DRIVE_FOLDER,
-        null,
-        drive
-    );
+    const mainFolder =
+        await getOrCreateDriveFolder(APP_DRIVE_FOLDER, null, drive);
 
     return getOrCreateDriveFolder(category, mainFolder, drive);
 }
 
-function cleanupFile(file) {
-    try {
-        if (file && fs.existsSync(file)) fs.unlinkSync(file);
-    } catch (error) {
-        console.error('ลบไฟล์ไม่สำเร็จ:', error.message);
-    }
-}
-
-
-// ======================================================
-// PDF -> JPEG สำหรับ Docker / Linux
-// ======================================================
+/* =====================================================
+   PDF -> JPEG
+===================================================== */
 
 async function convertPdfFirstPage(filePath) {
     const outputPrefix = path.join(
@@ -307,25 +323,22 @@ async function convertPdfFirstPage(filePath) {
 
     const outputFile = outputPrefix + '.jpg';
 
-    if (!fs.existsSync(outputFile)) {
+    if (!fs.existsSync(outputFile))
         throw new Error('ไม่สามารถแปลง PDF เป็นรูปภาพได้');
-    }
 
     return outputFile;
 }
 
-
-// ======================================================
-// PARSE AI RESULT
-// ======================================================
+/* =====================================================
+   PARSE AI RESULT
+===================================================== */
 
 function parseAiJson(text) {
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
 
-    if (start === -1 || end === -1) {
+    if (start === -1 || end === -1)
         throw new Error('AI ไม่ได้ส่ง JSON กลับมา');
-    }
 
     const parsed = JSON.parse(text.slice(start, end + 1));
     const result = new Map();
@@ -350,10 +363,7 @@ function parseAiJson(text) {
         percentage: result.get(name) ?? 0
     }));
 
-    const total = categories.reduce(
-        (sum, item) => sum + item.percentage,
-        0
-    );
+    const total = categories.reduce((sum, item) => sum + item.percentage, 0);
 
     if (total <= 0) {
         categories = categories.map(item => ({
@@ -363,51 +373,39 @@ function parseAiJson(text) {
     } else {
         categories = categories.map(item => ({
             ...item,
-            percentage:
-                Math.round((item.percentage / total) * 1000) / 10
+            percentage: Math.round((item.percentage / total) * 1000) / 10
         }));
     }
 
-    const normalizedTotal = categories.reduce(
-        (sum, item) => sum + item.percentage,
-        0
-    );
+    const normalizedTotal =
+        categories.reduce((sum, item) => sum + item.percentage, 0);
 
-    const diff =
-        Math.round((100 - normalizedTotal) * 10) / 10;
+    const diff = Math.round((100 - normalizedTotal) * 10) / 10;
 
     if (categories.length && diff !== 0) {
         const index = categories.reduce(
             (best, item, i, arr) =>
-                item.percentage > arr[best].percentage
-                    ? i
-                    : best,
+                item.percentage > arr[best].percentage ? i : best,
             0
         );
 
         categories[index].percentage =
-            Math.round(
-                (categories[index].percentage + diff) * 10
-            ) / 10;
+            Math.round((categories[index].percentage + diff) * 10) / 10;
     }
 
-    categories.sort(
-        (a, b) => b.percentage - a.percentage
-    );
+    categories.sort((a, b) => b.percentage - a.percentage);
 
     return {
-        reason:
-            typeof parsed.reason === 'string'
-                ? parsed.reason.trim()
-                : '',
+        reason: typeof parsed.reason === 'string'
+            ? parsed.reason.trim()
+            : '',
         categories
     };
 }
 
-
-// ======================================================
-// CLASSIFY
-// ======================================================
+/* =====================================================
+   CLASSIFY
+===================================================== */
 
 app.post(
     '/api/classify',
@@ -415,15 +413,13 @@ app.post(
     upload.single('image'),
     async (req, res) => {
 
-        if (!req.file) {
+        if (!req.file)
             return res.status(400).json({
                 error: 'กรุณาอัปโหลดไฟล์'
             });
-        }
 
-        req.file.originalname = fixThaiFilename(
-            req.file.originalname
-        );
+        req.file.originalname =
+            fixThaiFilename(req.file.originalname);
 
         const filePath = req.file.path;
 
@@ -434,51 +430,45 @@ app.post(
 
         let ocrSource = filePath;
         let tempFile = null;
-        let worker = null;
 
         try {
 
-            // PDF
+            /* PDF */
+
             if (
                 ext === 'pdf' ||
                 req.file.mimetype === 'application/pdf'
             ) {
-                tempFile = await convertPdfFirstPage(filePath);
+                tempFile =
+                    await convertPdfFirstPage(filePath);
+
                 ocrSource = tempFile;
 
-            // HEIC / HEIF
+            /* HEIC */
+
             } else if (
                 ext === 'heic' ||
                 ext === 'heif'
             ) {
+
                 const buffer = await heicConvert({
                     buffer: fs.readFileSync(filePath),
                     format: 'JPEG',
                     quality: 0.9
                 });
 
-                tempFile = filePath + '_converted.jpg';
+                tempFile =
+                    filePath + '_converted.jpg';
 
-                fs.writeFileSync(
-                    tempFile,
-                    buffer
-                );
+                fs.writeFileSync(tempFile, buffer);
 
                 ocrSource = tempFile;
             }
 
+            /* OCR */
 
-            // OCR
-            worker = await createWorker([
-                'tha',
-                'eng'
-            ]);
-
-            const { data: { text } } =
-                await worker.recognize(ocrSource);
-
-            await worker.terminate();
-            worker = null;
+            const text =
+                await recognizeText(ocrSource);
 
             cleanupFile(tempFile);
             tempFile = null;
@@ -493,10 +483,7 @@ app.post(
                 });
             }
 
-
-            // ==================================================
-            // AI PROMPT
-            // ==================================================
+            /* AI */
 
             const prompt = `
 คุณคือผู้เชี่ยวชาญด้านการจำแนกภาระงานอาจารย์ของมหาวิทยาลัย
@@ -541,7 +528,7 @@ app.post(
 - ประเมินคะแนนจากวัตถุประสงค์ เนื้อหา กลุ่มเป้าหมาย และกิจกรรมของเอกสาร
 - หากเอกสารตรงกับหมวดใดหมวดหนึ่งอย่างชัดเจนมาก และไม่มีสาระสำคัญที่สอดคล้องกับหมวดอื่น สามารถให้หมวดนั้น 100.0 และหมวดอื่น 0.0 ได้
 - หากเอกสารมีความเกี่ยวข้องหลายหมวด ให้กระจายคะแนนตามระดับความสอดคล้อง
-- หากผลไม่ชัดเจน ให้ใช้ทศนิยม 1 ตำแหน่งเพื่อสะท้อนระดับความสอดคล้อง เช่น 73.6, 14.2, 7.1
+- หากผลไม่ชัดเจน ให้ใช้ทศนิยม 1 ตำแหน่ง
 - ไม่จำเป็นต้องหลีกเลี่ยงเลขลงท้าย 0 หากคะแนนนั้นเหมาะสมกับหลักฐานจริง
 - ห้ามสร้างหรือสุ่มทศนิยมเพียงเพื่อให้คะแนนดูละเอียด
 - หากข้อมูลกำกวม ต้องไม่ให้คะแนนสูงเกินจริง
@@ -565,7 +552,6 @@ app.post(
 """${trimmedText}"""
 `;
 
-
             const completion =
                 await groq.chat.completions.create({
                     messages: [{
@@ -576,19 +562,17 @@ app.post(
                     temperature: 0
                 });
 
-
             const aiResult = parseAiJson(
                 completion.choices?.[0]?.message?.content || ''
             );
 
+            /* เก็บไฟล์รอยืนยัน */
 
-            // เก็บไฟล์รอผู้ใช้ยืนยันหมวด
             const uploadToken = crypto.randomUUID();
 
             const userEmail =
                 req.user.dbUser?.email?.toLowerCase() ||
                 req.user.emails?.[0]?.value?.toLowerCase();
-
 
             pendingUploads.set(uploadToken, {
                 filePath,
@@ -601,7 +585,6 @@ app.post(
                 createdAt: Date.now()
             });
 
-
             res.json({
                 success: true,
                 uploadToken,
@@ -611,19 +594,12 @@ app.post(
                     aiResult.categories[0]?.name || null
             });
 
-
         } catch (error) {
 
             console.error(
                 '❌ Classification Error:',
                 error
             );
-
-            if (worker) {
-                try {
-                    await worker.terminate();
-                } catch {}
-            }
 
             cleanupFile(filePath);
             cleanupFile(tempFile);
@@ -636,73 +612,54 @@ app.post(
     }
 );
 
-
-// ======================================================
-// UPLOAD SELECTED CATEGORY
-// ======================================================
+/* =====================================================
+   UPLOAD SELECTED CATEGORY
+===================================================== */
 
 app.post(
     '/api/upload-selected-category',
     checkAuth,
     async (req, res) => {
 
-        const {
-            uploadToken,
-            category
-        } = req.body;
+        const { uploadToken, category } = req.body;
 
-
-        if (!uploadToken || !category) {
+        if (!uploadToken || !category)
             return res.status(400).json({
                 error: 'ข้อมูลการอัปโหลดไม่ครบ'
             });
-        }
 
-
-        if (!CATEGORIES.includes(category)) {
+        if (!CATEGORIES.includes(category))
             return res.status(400).json({
                 error: 'หมวดหมู่ไม่ถูกต้อง'
             });
-        }
-
 
         const pending =
             pendingUploads.get(uploadToken);
 
-
-        if (!pending) {
+        if (!pending)
             return res.status(404).json({
-                error:
-                    'ไม่พบไฟล์ที่รออัปโหลด กรุณาวิเคราะห์เอกสารใหม่อีกครั้ง'
+                error: 'ไม่พบไฟล์ที่รออัปโหลด กรุณาวิเคราะห์เอกสารใหม่อีกครั้ง'
             });
-        }
-
 
         const currentEmail =
             req.user.dbUser?.email?.toLowerCase() ||
             req.user.emails?.[0]?.value?.toLowerCase();
 
-
-        if (pending.userEmail !== currentEmail) {
+        if (pending.userEmail !== currentEmail)
             return res.status(403).json({
                 error: 'ไม่มีสิทธิ์อัปโหลดไฟล์นี้'
             });
-        }
-
 
         if (!fs.existsSync(pending.filePath)) {
             pendingUploads.delete(uploadToken);
 
             return res.status(404).json({
-                error:
-                    'ไฟล์ชั่วคราวหาย กรุณาวิเคราะห์ใหม่'
+                error: 'ไฟล์ชั่วคราวหาย กรุณาวิเคราะห์ใหม่'
             });
         }
 
-
         try {
 
-            // Google OAuth
             const oauth2Client =
                 new google.auth.OAuth2(
                     process.env.GOOGLE_CLIENT_ID,
@@ -711,16 +668,11 @@ app.post(
                     'http://localhost:3000/auth/google/callback'
                 );
 
-
             oauth2Client.setCredentials({
-                access_token:
-                    req.user.accessToken,
-
+                access_token: req.user.accessToken,
                 refresh_token:
-                    req.user.refreshToken ||
-                    undefined
+                    req.user.refreshToken || undefined
             });
-
 
             const drive =
                 google.drive({
@@ -728,21 +680,16 @@ app.post(
                     auth: oauth2Client
                 });
 
-
-            // หา/สร้างโฟลเดอร์หมวด
             const folderId =
                 await getUserCategoryFolder(
                     category,
                     drive
                 );
 
-
-            // Upload ไฟล์ต้นฉบับ
             const response =
                 await drive.files.create({
                     resource: {
-                        name:
-                            pending.originalFileName,
+                        name: pending.originalFileName,
                         parents: [folderId]
                     },
 
@@ -759,18 +706,14 @@ app.post(
                     fields: 'id,name'
                 });
 
-
             const userId =
                 pending.userId ||
                 req.user.dbUser?.id;
 
-
-            if (!userId) {
+            if (!userId)
                 throw new Error(
                     'ไม่พบ user_id ของผู้ใช้งาน'
                 );
-            }
-
 
             const selected =
                 pending.categories.find(
@@ -778,52 +721,44 @@ app.post(
                         item.name === category
                 );
 
-
             const confidence =
                 selected
                     ? Number(selected.percentage)
                     : null;
 
-
-            // ==================================================
-            // DATABASE TRANSACTION
-            // ==================================================
+            /* DATABASE */
 
             const connection =
                 await db.getConnection();
-
 
             try {
 
                 await connection.beginTransaction();
 
+                await connection.execute(
+                    `INSERT INTO files
+                    (user_id,original_name,category,drive_file_id,created_at)
+                    VALUES (?,?,?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 7 HOUR))`,
+                    [
+                        userId,
+                        pending.originalFileName,
+                        category,
+                        response.data.id
+                    ]
+                );
 
                 await connection.execute(
-    `INSERT INTO files
-     (user_id, original_name, category, drive_file_id, created_at)
-     VALUES (?, ?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))`,
-    [
-        userId,
-        pending.originalFileName,
-        category,
-        response.data.id
-    ]
-);
-
-await connection.execute(
-    `INSERT INTO logs
-     (user_id, category, confidence, created_at)
-     VALUES (?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))`,
-    [
-        userId,
-        category,
-        confidence
-    ]
-);
-
+                    `INSERT INTO logs
+                    (user_id,category,confidence,created_at)
+                    VALUES (?,?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 7 HOUR))`,
+                    [
+                        userId,
+                        category,
+                        confidence
+                    ]
+                );
 
                 await connection.commit();
-
 
             } catch (error) {
 
@@ -835,27 +770,17 @@ await connection.execute(
                 connection.release();
             }
 
-
-            cleanupFile(
-                pending.filePath
-            );
-
-            pendingUploads.delete(
-                uploadToken
-            );
-
+            cleanupFile(pending.filePath);
+            pendingUploads.delete(uploadToken);
 
             res.json({
                 success: true,
                 category,
                 confidence,
-                driveFileId:
-                    response.data.id,
-
+                driveFileId: response.data.id,
                 message:
                     `จัดเก็บเอกสารเข้า Google Drive หมวด [${category}] เรียบร้อยแล้ว`
             });
-
 
         } catch (error) {
 
@@ -867,7 +792,6 @@ await connection.execute(
             res.status(500).json({
                 error:
                     'อัปโหลด Google Drive ไม่สำเร็จ',
-
                 detail:
                     error.message
             });
@@ -875,41 +799,31 @@ await connection.execute(
     }
 );
 
-
-// ======================================================
-// CLEAN TEMP FILES
-// ======================================================
+/* =====================================================
+   CLEAN TEMP FILES
+===================================================== */
 
 setInterval(() => {
 
     const now = Date.now();
 
-    for (
-        const [token, pending]
-        of pendingUploads
-    ) {
+    for (const [token, pending] of pendingUploads) {
 
         if (
             now - pending.createdAt >
             30 * 60 * 1000
         ) {
 
-            cleanupFile(
-                pending.filePath
-            );
-
-            pendingUploads.delete(
-                token
-            );
+            cleanupFile(pending.filePath);
+            pendingUploads.delete(token);
         }
     }
 
 }, 5 * 60 * 1000).unref();
 
-
-// ======================================================
-// START SERVER
-// ======================================================
+/* =====================================================
+   START SERVER
+===================================================== */
 
 async function startServer() {
 
@@ -923,7 +837,6 @@ async function startServer() {
         );
 
         connection.release();
-
 
         const [users] =
             await db.execute(
@@ -940,37 +853,34 @@ async function startServer() {
                 `SHOW TABLES LIKE 'files'`
             );
 
-
-        if (!users.length) {
+        if (!users.length)
             throw new Error(
                 'ไม่พบตาราง users'
             );
-        }
 
-        if (!logs.length) {
+        if (!logs.length)
             throw new Error(
                 'ไม่พบตาราง logs'
             );
-        }
 
-        if (!files.length) {
+        if (!files.length)
             throw new Error(
                 'ไม่พบตาราง files'
             );
-        }
 
+        /* เตรียม OCR ก่อนเปิด Server */
+
+        await initOcrPool();
 
         app.listen(
             PORT,
             '0.0.0.0',
             () => {
-
                 console.log(
                     `🚀 Server รันอยู่ที่ port ${PORT}`
                 );
             }
         );
-
 
     } catch (error) {
 
@@ -982,6 +892,5 @@ async function startServer() {
         process.exit(1);
     }
 }
-
 
 startServer();
