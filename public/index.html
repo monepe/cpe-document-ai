@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPE Document AI | LPRU</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="/css/index.css">
+</head>
+
+<body>
+
+<header class="topbar">
+    <div class="brand">
+        <img src="/images/cpe-logo.jpg" class="brand-logo" alt="CPE Logo">
+
+        <div>
+            <strong>มหาวิทยาลัยราชภัฏลำปาง</strong>
+            <span>Computer Engineering · LPRU</span>
+        </div>
+    </div>
+
+    <div class="topbar-right">
+        <span class="system-name">CPE Document AI</span>
+        <a href="/api/logout" class="btn-logout">ออกจากระบบ</a>
+    </div>
+</header>
+
+
+<main class="page">
+
+    <!-- HERO -->
+    <section class="dashboard-hero">
+
+        <div class="hero-text">
+            <span class="hero-label">CPE · COMPUTER ENGINEERING</span>
+
+            <h1>ระบบจำแนกเอกสารด้วยปัญญาประดิษฐ์ (AI)</h1>
+
+            <h2>สาขาวิชาวิศวกรรมคอมพิวเตอร์</h2>
+
+            <p>
+                คณะเทคโนโลยีอุตสาหกรรม
+                มหาวิทยาลัยราชภัฏลำปาง
+            </p>
+        </div>
+
+        <div class="hero-building">
+            <img
+                src="/images/industrial-building-13.jpeg"
+                alt="คณะเทคโนโลยีอุตสาหกรรม"
+            >
+        </div>
+
+    </section>
+
+
+    <!-- WORKFLOW -->
+    <section class="workflow">
+
+        <div class="workflow-item">
+            <span class="workflow-number">1</span>
+            <div>
+                <strong>อัปโหลดเอกสาร</strong>
+                <p>PDF / JPG / PNG / HEIC</p>
+            </div>
+        </div>
+
+        <div class="workflow-item">
+            <span class="workflow-number">2</span>
+            <div>
+                <strong>AI วิเคราะห์</strong>
+                <p>OCR และวิเคราะห์เนื้อหา</p>
+            </div>
+        </div>
+
+        <div class="workflow-item">
+            <span class="workflow-number">3</span>
+            <div>
+                <strong>เลือกหมวดหมู่</strong>
+                <p>ตรวจสอบผลก่อนยืนยัน</p>
+            </div>
+        </div>
+
+        <div class="workflow-item">
+            <span class="workflow-number">4</span>
+            <div>
+                <strong>Google Drive</strong>
+                <p>บันทึกตามหมวดหมู่</p>
+            </div>
+        </div>
+
+    </section>
+
+
+    <!-- DASHBOARD -->
+    <section class="dashboard-grid">
+
+        <!-- UPLOAD -->
+        <div class="panel">
+
+            <div class="panel-title">
+                <span class="step">1</span>
+                <h3>อัปโหลดเอกสาร</h3>
+            </div>
+
+            <form id="uploadForm">
+
+                <div id="dropArea" class="upload-area">
+
+                    <div class="upload-icon">↑</div>
+
+                    <strong>ลากไฟล์มาวางที่นี่</strong>
+
+                    <span>หรือคลิกเพื่อเลือกไฟล์</span>
+
+                    <small>
+                        รองรับ PDF, JPG, JPEG, PNG, HEIC และ HEIF
+                        ขนาดไม่เกิน 50 MB
+                    </small>
+
+                    <div id="fileName" class="file-name-display"></div>
+
+                </div>
+
+                <input
+                    type="file"
+                    id="imageInput"
+                    name="image"
+                    accept="image/*,application/pdf,.heic,.heif"
+                    hidden
+                >
+
+                <button
+                    type="submit"
+                    id="submitBtn"
+                    class="btn-analyze"
+                >
+                    วิเคราะห์เอกสารด้วย AI
+                </button>
+
+            </form>
+
+
+            <div id="loading" class="loading-container">
+
+                <div class="spinner"></div>
+
+                <div id="loadingText" class="loading-text">
+                    กำลังอ่านข้อความและวิเคราะห์เอกสาร...
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- RESULT -->
+        <div id="result" class="panel result-box">
+
+            <div class="panel-title">
+                <span class="step">2</span>
+                <h3>ผลการวิเคราะห์</h3>
+            </div>
+
+            <div class="result-header">
+                <span>✓ AI วิเคราะห์เอกสารเรียบร้อยแล้ว</span>
+                <small>กรุณาตรวจสอบผลก่อนยืนยันหมวดหมู่</small>
+            </div>
+
+            <h4 class="reason-title">เหตุผลประกอบ</h4>
+
+            <div id="reason" class="reason-box"></div>
+
+            <h4 class="category-title">
+                คะแนนความเหมาะสมของแต่ละหมวด
+            </h4>
+
+            <div id="categoryList" class="category-list"></div>
+
+            <!-- แสดงเฉพาะกำลังอัปโหลดและ Error -->
+            <div id="uploadStatus" class="upload-status"></div>
+
+        </div>
+
+    </section>
+
+</main>
+
+
+<!-- POPUP ยืนยันหมวดหมู่ -->
+<div id="confirmPopup" class="custom-popup">
+
+    <div class="custom-popup-box">
+
+        <div class="confirm-popup-icon">?</div>
+
+        <h3>ยืนยันการเลือกหมวดหมู่</h3>
+
+        <p>คุณต้องการเลือกหมวดหมู่</p>
+
+        <div
+            id="confirmCategoryName"
+            class="confirm-category-name"
+        ></div>
+
+        <p>
+            ระบบจะอัปโหลดไฟล์เข้า Google Drive
+        </p>
+
+        <div class="popup-buttons">
+
+            <button
+                type="button"
+                id="confirmCancelButton"
+                class="popup-cancel"
+            >
+                ยกเลิก
+            </button>
+
+            <button
+                type="button"
+                id="confirmOkButton"
+                class="popup-confirm"
+            >
+                ยืนยัน
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- POPUP UPLOAD SUCCESS -->
+<div id="successPopup" class="custom-popup">
+
+    <div class="custom-popup-box">
+
+        <div class="success-popup-icon">✓</div>
+
+        <h3>จัดเก็บเอกสารสำเร็จ</h3>
+
+        <p id="successPopupText"></p>
+
+        <button
+            type="button"
+            id="successPopupButton"
+            class="popup-confirm popup-full-button"
+        >
+            ตกลง
+        </button>
+
+    </div>
+
+</div>
+
+
+<script src="/js/index.js"></script>
+
+</body>
+</html>

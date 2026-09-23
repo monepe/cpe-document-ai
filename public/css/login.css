@@ -1,0 +1,879 @@
+/* =====================================================
+   RESET
+===================================================== */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --primary: #a30d1b;
+    --primary-dark: #730812;
+    --primary-light: #c5162b;
+
+    --navy: #10203a;
+    --text: #111a2d;
+    --muted: #667085;
+
+    --white: #ffffff;
+    --border: #e5e7eb;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+}
+
+body {
+    font-family: "Sarabun", sans-serif;
+    color: var(--text);
+    background: #ffffff;
+    overflow: hidden;
+}
+
+
+/* =====================================================
+   MAIN LAYOUT
+===================================================== */
+
+.login-page {
+    width: 100%;
+    height: 100vh;
+
+    display: grid;
+    grid-template-columns: 58% 42%;
+}
+
+
+/* =====================================================
+   LEFT HERO
+===================================================== */
+
+.hero {
+    position: relative;
+
+    width: 100%;
+    height: 100vh;
+
+    overflow: hidden;
+
+    background-image:
+        linear-gradient(
+            to bottom,
+            rgba(255, 255, 255, 1) 0%,
+            rgba(255, 255, 255, .99) 34%,
+            rgba(255, 255, 255, .94) 43%,
+            rgba(255, 255, 255, .70) 52%,
+            rgba(255, 255, 255, .20) 64%,
+            rgba(150, 15, 29, .18) 76%,
+            rgba(130, 10, 23, .58) 88%,
+            rgba(105, 8, 18, .96) 100%
+        ),
+        url("/images/industrial-building-13.jpeg");
+
+    background-size: 100% auto;
+    background-position: center bottom;
+    background-repeat: no-repeat;
+
+    background-color: #ffffff;
+}
+
+
+/* =====================================================
+   GRID DECORATION
+===================================================== */
+
+.hero::after {
+    content: "";
+
+    position: absolute;
+    inset: 0;
+
+    z-index: 1;
+
+    pointer-events: none;
+
+    background-image:
+        linear-gradient(
+            rgba(163, 13, 27, .035) 1px,
+            transparent 1px
+        ),
+        linear-gradient(
+            90deg,
+            rgba(163, 13, 27, .035) 1px,
+            transparent 1px
+        );
+
+    background-size: 55px 55px;
+}
+
+
+/* =====================================================
+   HERO CONTENT
+===================================================== */
+
+.hero-content {
+    position: relative;
+    z-index: 2;
+
+    width: 100%;
+    max-width: none;
+
+    margin: 0;
+
+    padding: 38px 5vw;
+}
+
+
+/* =====================================================
+   UNIVERSITY
+===================================================== */
+
+.university {
+    display: flex;
+    align-items: center;
+
+    gap: 16px;
+
+    margin-bottom: 48px;
+}
+
+.university-logo {
+    width: 72px;
+    height: 72px;
+
+    flex-shrink: 0;
+
+    object-fit: contain;
+}
+
+.university h3 {
+    color: var(--navy);
+
+    font-size: 25px;
+    line-height: 1.25;
+
+    font-weight: 700;
+}
+
+.university p {
+    margin-top: 3px;
+
+    color: #526176;
+
+    font-size: 15px;
+    line-height: 1.4;
+}
+
+
+/* =====================================================
+   MAIN TITLE
+===================================================== */
+
+.title {
+    width: 100%;
+    max-width: 850px;
+}
+
+.title h1 {
+    color: var(--primary);
+
+    font-size: clamp(46px, 4vw, 67px);
+
+    line-height: 1.08;
+
+    letter-spacing: -1.5px;
+
+    font-weight: 800;
+}
+
+.title h2 {
+    margin-top: 14px;
+
+    color: var(--navy);
+
+    font-size: 29px;
+    line-height: 1.3;
+
+    font-weight: 700;
+}
+
+.title p {
+    margin-top: 5px;
+
+    color: #5d6c80;
+
+    font-size: 17px;
+    line-height: 1.5;
+
+    font-weight: 500;
+}
+
+
+/* =====================================================
+   CPE LPRU BOTTOM LEFT
+===================================================== */
+
+.hero-footer {
+    position: absolute;
+
+    z-index: 3;
+
+    left: 5vw;
+    bottom: 55px;
+
+    color: #ffffff;
+}
+
+.hero-footer strong {
+    display: block;
+
+    font-size: 32px;
+    line-height: 1.15;
+
+    font-weight: 800;
+}
+
+.hero-footer small {
+    display: block;
+
+    margin-top: 7px;
+
+    color: rgba(255, 255, 255, .95);
+
+    font-size: 14px;
+    line-height: 1.5;
+
+    font-weight: 500;
+}
+
+
+/* =====================================================
+   RIGHT SIDE
+===================================================== */
+
+.login-side {
+    position: relative;
+
+    width: 100%;
+    height: 100vh;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 45px;
+
+    background:
+        radial-gradient(
+            circle at 100% 0%,
+            rgba(163, 13, 27, .09),
+            transparent 40%
+        ),
+        radial-gradient(
+            circle at 0% 100%,
+            rgba(163, 13, 27, .025),
+            transparent 35%
+        ),
+        #ffffff;
+}
+
+
+/* =====================================================
+   LOGIN CARD
+===================================================== */
+
+.login-card {
+    width: 100%;
+    max-width: 560px;
+
+    padding: 48px;
+
+    background: rgba(255, 255, 255, .98);
+
+    border: 1px solid var(--border);
+    border-radius: 26px;
+
+    box-shadow:
+        0 25px 65px rgba(16, 24, 40, .12);
+}
+
+
+/* =====================================================
+   CPE LOGO
+===================================================== */
+
+.logo {
+    margin-bottom: 12px;
+
+    text-align: center;
+}
+
+.logo img {
+    width: 145px;
+    height: 145px;
+
+    object-fit: contain;
+}
+
+
+/* =====================================================
+   LOGIN TITLE
+===================================================== */
+
+.login-card h2 {
+    color: var(--navy);
+
+    text-align: center;
+
+    font-size: 34px;
+    line-height: 1.25;
+
+    font-weight: 800;
+}
+
+.login-description {
+    margin-top: 10px;
+    margin-bottom: 28px;
+
+    color: var(--muted);
+
+    text-align: center;
+
+    font-size: 16px;
+    line-height: 1.6;
+}
+
+
+/* =====================================================
+   ERROR
+===================================================== */
+
+.alert-error {
+    display: none;
+
+    width: 100%;
+
+    margin-bottom: 18px;
+    padding: 14px 16px;
+
+    border: 1px solid #fecdca;
+    border-radius: 12px;
+
+    background: #fee4e2;
+
+    color: #b42318;
+
+    font-size: 14px;
+    line-height: 1.5;
+
+    font-weight: 600;
+}
+
+
+/* =====================================================
+   GOOGLE LOGIN BUTTON
+===================================================== */
+
+.btn-google {
+    width: 100%;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    gap: 11px;
+
+    padding: 16px 20px;
+
+    border: none;
+    border-radius: 12px;
+
+    background:
+        linear-gradient(
+            135deg,
+            var(--primary),
+            var(--primary-light)
+        );
+
+    color: #ffffff;
+
+    text-decoration: none;
+
+    font-size: 17px;
+    font-weight: 700;
+
+    box-shadow:
+        0 8px 20px rgba(163, 13, 27, .22);
+
+    transition:
+        transform .2s ease,
+        box-shadow .2s ease,
+        background .2s ease;
+}
+
+.btn-google:hover {
+    transform: translateY(-2px);
+
+    background:
+        linear-gradient(
+            135deg,
+            var(--primary-dark),
+            var(--primary)
+        );
+
+    box-shadow:
+        0 12px 28px rgba(163, 13, 27, .30);
+}
+
+.btn-google:active {
+    transform: translateY(0);
+}
+
+.google-logo {
+    width: 22px;
+    height: 22px;
+
+    flex-shrink: 0;
+}
+
+
+/* =====================================================
+   DIVIDER
+===================================================== */
+
+.divider {
+    width: 100%;
+
+    display: flex;
+    align-items: center;
+
+    gap: 12px;
+
+    margin: 24px 0;
+
+    color: #98a2b3;
+
+    font-size: 13px;
+}
+
+.divider::before,
+.divider::after {
+    content: "";
+
+    flex: 1;
+
+    height: 1px;
+
+    background: #e4e7ec;
+}
+
+.divider span {
+    white-space: nowrap;
+}
+
+
+/* =====================================================
+   INFO BOX
+===================================================== */
+
+.info {
+    width: 100%;
+
+    padding: 16px 18px;
+
+    border: 1px solid #ffcdd2;
+    border-radius: 12px;
+
+    background: #fff4f5;
+
+    color: #9a1c28;
+
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+
+/* =====================================================
+   LARGE DESKTOP
+===================================================== */
+
+@media (min-width: 1700px) {
+
+    .hero-content {
+        padding-left: 5.2vw;
+        padding-right: 5.2vw;
+    }
+
+    .hero-footer {
+        left: 5.2vw;
+    }
+
+    .university-logo {
+        width: 78px;
+        height: 78px;
+    }
+
+    .university h3 {
+        font-size: 27px;
+    }
+
+    .university p {
+        font-size: 16px;
+    }
+
+    .title h1 {
+        font-size: 68px;
+    }
+
+    .title h2 {
+        font-size: 30px;
+    }
+
+    .title p {
+        font-size: 18px;
+    }
+
+    .login-card {
+        max-width: 580px;
+        padding: 50px;
+    }
+
+    .logo img {
+        width: 150px;
+        height: 150px;
+    }
+}
+
+
+/* =====================================================
+   TABLET
+   601px - 950px
+===================================================== */
+
+@media (max-width: 950px) {
+
+    html,
+    body {
+        height: auto;
+    }
+
+    body {
+        overflow-y: auto;
+    }
+
+    .login-page {
+        width: 100%;
+        height: auto;
+
+        display: block;
+    }
+
+    .hero {
+        width: 100%;
+        height: 650px;
+
+        background-size: cover;
+        background-position: center bottom;
+    }
+
+    .hero-content {
+        padding: 30px 35px;
+    }
+
+    .university {
+        margin-bottom: 35px;
+    }
+
+    .university-logo {
+        width: 62px;
+        height: 62px;
+    }
+
+    .university h3 {
+        font-size: 22px;
+    }
+
+    .university p {
+        font-size: 14px;
+    }
+
+    .title {
+        max-width: 700px;
+    }
+
+    .title h1 {
+        font-size: 48px;
+    }
+
+    .title h2 {
+        font-size: 25px;
+    }
+
+    .title p {
+        font-size: 15px;
+    }
+
+    .hero-footer {
+        left: 35px;
+        bottom: 35px;
+    }
+
+    .login-side {
+        width: 100%;
+        height: auto;
+        min-height: 650px;
+
+        padding: 55px 25px;
+    }
+
+    .login-card {
+        width: 100%;
+        max-width: 520px;
+
+        padding: 42px;
+    }
+}
+
+
+/* =====================================================
+   MOBILE
+   <= 600px
+===================================================== */
+
+@media (max-width: 600px) {
+
+    html,
+    body {
+        width: 100%;
+        min-height: 100%;
+        height: auto;
+    }
+
+    body {
+        overflow-y: auto;
+
+        background: #f8f9fb;
+    }
+
+
+    /* -----------------------------------------
+       MAIN
+    ----------------------------------------- */
+
+    .login-page {
+        display: block;
+
+        width: 100%;
+        min-height: 100vh;
+        height: auto;
+    }
+
+
+    /* -----------------------------------------
+       ซ่อนฝั่งรูปตึกบนโทรศัพท์
+    ----------------------------------------- */
+
+    .hero {
+        display: none;
+    }
+
+
+    /* -----------------------------------------
+       LOGIN AREA
+    ----------------------------------------- */
+
+    .login-side {
+        width: 100%;
+
+        min-height: 100vh;
+        height: auto;
+
+        display: flex;
+        align-items: center;
+        justify-content: center;
+
+        padding:
+            24px
+            16px;
+
+        background:
+            radial-gradient(
+                circle at 100% 0%,
+                rgba(163, 13, 27, .08),
+                transparent 42%
+            ),
+            radial-gradient(
+                circle at 0% 100%,
+                rgba(163, 13, 27, .04),
+                transparent 40%
+            ),
+            #f8f9fb;
+    }
+
+
+    /* -----------------------------------------
+       CARD
+    ----------------------------------------- */
+
+    .login-card {
+        width: 100%;
+        max-width: 420px;
+
+        padding:
+            34px
+            24px;
+
+        border-radius: 20px;
+
+        background: #ffffff;
+
+        box-shadow:
+            0 15px 40px
+            rgba(16, 24, 40, .10);
+    }
+
+
+    /* -----------------------------------------
+       LOGO
+    ----------------------------------------- */
+
+    .logo {
+        margin-bottom: 8px;
+    }
+
+    .logo img {
+        width: 110px;
+        height: 110px;
+    }
+
+
+    /* -----------------------------------------
+       TITLE
+    ----------------------------------------- */
+
+    .login-card h2 {
+        font-size: 28px;
+    }
+
+    .login-description {
+        margin-top: 7px;
+        margin-bottom: 22px;
+
+        font-size: 14px;
+        line-height: 1.55;
+    }
+
+
+    /* -----------------------------------------
+       GOOGLE BUTTON
+    ----------------------------------------- */
+
+    .btn-google {
+        padding:
+            14px
+            15px;
+
+        border-radius: 11px;
+
+        font-size: 15px;
+    }
+
+    .google-logo {
+        width: 20px;
+        height: 20px;
+    }
+
+
+    /* -----------------------------------------
+       DIVIDER
+    ----------------------------------------- */
+
+    .divider {
+        margin: 20px 0;
+
+        gap: 8px;
+
+        font-size: 11px;
+    }
+
+
+    /* -----------------------------------------
+       INFO
+    ----------------------------------------- */
+
+    .info {
+        padding:
+            13px
+            14px;
+
+        font-size: 13px;
+        line-height: 1.55;
+    }
+
+
+    /* -----------------------------------------
+       ERROR
+    ----------------------------------------- */
+
+    .alert-error {
+        padding:
+            12px
+            13px;
+
+        font-size: 13px;
+    }
+}
+
+
+/* =====================================================
+   SMALL MOBILE
+   <= 380px
+===================================================== */
+
+@media (max-width: 380px) {
+
+    .login-side {
+        padding:
+            18px
+            12px;
+    }
+
+    .login-card {
+        padding:
+            28px
+            18px;
+    }
+
+    .logo img {
+        width: 95px;
+        height: 95px;
+    }
+
+    .login-card h2 {
+        font-size: 25px;
+    }
+
+    .login-description {
+        font-size: 13px;
+    }
+
+    .btn-google {
+        padding:
+            13px
+            10px;
+
+        font-size: 14px;
+    }
+
+    .divider {
+        font-size: 10px;
+    }
+
+    .info {
+        font-size: 12px;
+    }
+}
