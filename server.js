@@ -401,7 +401,6 @@ function parseAiJson(text) {
 
     if (Array.isArray(parsed.categories)) {
         for (const item of parsed.categories) {
-
             if (
                 !item ||
                 !CATEGORIES.includes(item.name)
@@ -414,28 +413,70 @@ function parseAiJson(text) {
             result.set(
                 item.name,
                 Number.isFinite(value)
-                    ? Math.max(
-                        0,
-                        Math.min(
-                            100,
-                            Math.round(value * 10) / 10
-                        )
-                    )
+                    ? Math.max(0, value)
                     : 0
             );
         }
     }
 
-    // ใช้คะแนนที่ AI ส่งกลับมาโดยตรง
-    const categories = CATEGORIES
-        .map(name => ({
-            name,
-            percentage: result.get(name) ?? 0
-        }))
-        .sort(
-            (a, b) =>
-                b.percentage - a.percentage
+    let categories = CATEGORIES.map(name => ({
+        name,
+        percentage: result.get(name) ?? 0
+    }));
+
+    // ผลรวมคะแนนที่ AI ส่งมา
+    const total = categories.reduce(
+        (sum, item) => sum + item.percentage,
+        0
+    );
+
+    if (total <= 0) {
+        // ถ้า AI ไม่ให้คะแนนที่ใช้ได้
+        // ไม่หารเป็น 20% ทุกหมวด
+        categories = categories.map(item => ({
+            ...item,
+            percentage:
+                item.name === 'อื่นๆ' ? 100 : 0
+        }));
+    } else {
+        // ปรับสัดส่วนให้ทั้ง 5 หมวดรวมกันเป็น 100%
+        categories = categories.map(item => ({
+            ...item,
+            percentage:
+                Math.round(
+                    (item.percentage / total) * 1000
+                ) / 10
+        }));
+    }
+
+    // แก้เศษจากการปัดทศนิยมให้รวม = 100.0 พอดี
+    const normalizedTotal = categories.reduce(
+        (sum, item) => sum + item.percentage,
+        0
+    );
+
+    const diff =
+        Math.round((100 - normalizedTotal) * 10) / 10;
+
+    if (categories.length && diff !== 0) {
+        const maxIndex = categories.reduce(
+            (best, item, index, arr) =>
+                item.percentage > arr[best].percentage
+                    ? index
+                    : best,
+            0
         );
+
+        categories[maxIndex].percentage =
+            Math.round(
+                (categories[maxIndex].percentage + diff) * 10
+            ) / 10;
+    }
+
+    // เรียงคะแนนสูงสุดก่อน
+    categories.sort(
+        (a, b) => b.percentage - a.percentage
+    );
 
     return {
         reason:
@@ -566,15 +607,16 @@ app.post(
 - ห้ามสร้างชื่อหมวดใหม่
 
 กฎการให้คะแนน:
-- ประเมินความสอดคล้องของแต่ละหมวดอย่างอิสระในช่วง 0.0 ถึง 100.0
-- คะแนนของแต่ละหมวดไม่จำเป็นต้องรวมกันเป็น 100
-- 100 หมายถึงเอกสารสอดคล้องกับหมวดนั้นอย่างชัดเจนมาก
-- 0 หมายถึงไม่พบหลักฐานว่าเอกสารเกี่ยวข้องกับหมวดนั้น
-- ให้คะแนนตามหลักฐานจริงจากวัตถุประสงค์ เนื้อหา กลุ่มเป้าหมาย และกิจกรรม
-- ห้ามแจกคะแนนขั้นต่ำให้ทุกหมวด
-- หากเอกสารเกี่ยวข้องกับหลายหมวด แต่ละหมวดสามารถมีคะแนนสูงพร้อมกันได้
-- หากข้อมูลไม่เพียงพอหรือ OCR อ่านไม่ชัด ให้ลดคะแนนของหมวดที่ไม่สามารถยืนยันได้
-- หากไม่ตรงกับ 4 ภาระงานหลัก ให้ "อื่นๆ" มีคะแนนสูง
+- ต้องประเมินครบทั้ง 5 หมวด
+- คะแนนของทั้ง 5 หมวดรวมกันต้องเท่ากับ 100.0
+- คะแนนแต่ละหมวดต้องสะท้อนสัดส่วนความสอดคล้องกับเนื้อหาเอกสาร
+- หมวดที่ตรงกับวัตถุประสงค์หลักของเอกสารต้องมีคะแนนสูงที่สุด
+- หมวดที่ไม่พบหลักฐานว่าสอดคล้อง ให้คะแนน 0.0
+- ห้ามแจกคะแนนขั้นต่ำให้ทุกหมวดเพียงเพื่อให้ครบ 100
+- หากเอกสารเกี่ยวข้องหลายหมวด ให้กระจายคะแนนตามระดับความเกี่ยวข้องจริง
+- หากเอกสารตรงกับหมวดเดียวอย่างชัดเจน สามารถให้หมวดนั้น 100.0 และหมวดอื่น 0.0 ได้
+- หากไม่ตรงกับ 4 ภาระงานหลัก ให้ "อื่นๆ" มีคะแนนสูงที่สุด
+- หาก OCR ไม่ชัดเจนหรือข้อมูลไม่เพียงพอ ให้เพิ่มสัดส่วนของ "อื่นๆ"
 - ใช้ทศนิยม 1 ตำแหน่งเมื่อจำเป็น
 
 ตอบ JSON เท่านั้น:
