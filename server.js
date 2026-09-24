@@ -389,68 +389,59 @@ function parseAiJson(text) {
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
 
-    if (start === -1 || end === -1)
+    if (start === -1 || end === -1) {
         throw new Error('AI ไม่ได้ส่ง JSON กลับมา');
+    }
 
-    const parsed = JSON.parse(text.slice(start, end + 1));
+    const parsed = JSON.parse(
+        text.slice(start, end + 1)
+    );
+
     const result = new Map();
 
     if (Array.isArray(parsed.categories)) {
         for (const item of parsed.categories) {
-            if (!item || !CATEGORIES.includes(item.name)) continue;
+
+            if (
+                !item ||
+                !CATEGORIES.includes(item.name)
+            ) {
+                continue;
+            }
 
             const value = Number(item.percentage);
 
             result.set(
                 item.name,
                 Number.isFinite(value)
-                    ? Math.max(0, Math.min(100, value))
+                    ? Math.max(
+                        0,
+                        Math.min(
+                            100,
+                            Math.round(value * 10) / 10
+                        )
+                    )
                     : 0
             );
         }
     }
 
-    let categories = CATEGORIES.map(name => ({
-        name,
-        percentage: result.get(name) ?? 0
-    }));
-
-    const total = categories.reduce((sum, item) => sum + item.percentage, 0);
-
-    if (total <= 0) {
-        categories = categories.map(item => ({
-            ...item,
-            percentage: 100 / CATEGORIES.length
-        }));
-    } else {
-        categories = categories.map(item => ({
-            ...item,
-            percentage: Math.round((item.percentage / total) * 1000) / 10
-        }));
-    }
-
-    const normalizedTotal =
-        categories.reduce((sum, item) => sum + item.percentage, 0);
-
-    const diff = Math.round((100 - normalizedTotal) * 10) / 10;
-
-    if (categories.length && diff !== 0) {
-        const index = categories.reduce(
-            (best, item, i, arr) =>
-                item.percentage > arr[best].percentage ? i : best,
-            0
+    // ใช้คะแนนที่ AI ส่งกลับมาโดยตรง
+    const categories = CATEGORIES
+        .map(name => ({
+            name,
+            percentage: result.get(name) ?? 0
+        }))
+        .sort(
+            (a, b) =>
+                b.percentage - a.percentage
         );
 
-        categories[index].percentage =
-            Math.round((categories[index].percentage + diff) * 10) / 10;
-    }
-
-    categories.sort((a, b) => b.percentage - a.percentage);
-
     return {
-        reason: typeof parsed.reason === 'string'
-            ? parsed.reason.trim()
-            : '',
+        reason:
+            typeof parsed.reason === 'string'
+                ? parsed.reason.trim()
+                : '',
         categories
     };
 }
@@ -575,18 +566,15 @@ app.post(
 - ห้ามสร้างชื่อหมวดใหม่
 
 กฎการให้คะแนน:
-- ต้องประเมินครบทั้ง 5 หมวด และคะแนนรวมทั้งหมดต้องเท่ากับ 100.0
-- คะแนนของแต่ละหมวดต้องสะท้อนหลักฐานที่พบจริงในเนื้อหาเอกสาร
-- ห้ามแจกคะแนนขั้นต่ำให้ทุกหมวดเพียงเพื่อให้ทุกหมวดมีคะแนน
-- หมวดที่ไม่พบหลักฐานว่าสอดคล้องกับเนื้อหา ให้คะแนน 0.0
-- ให้คะแนนมากกว่า 0 เฉพาะหมวดที่มีเนื้อหา วัตถุประสงค์ กลุ่มเป้าหมาย หรือกิจกรรมรองรับ
-- หากเอกสารเกี่ยวข้องกับหมวดเดียวอย่างชัดเจน สามารถให้ 100.0 และหมวดอื่น 0.0 ได้
-- หากเกี่ยวข้องกับหลายหมวด ให้กระจายคะแนนตามระดับความเกี่ยวข้องจริง
-- หมวดที่ตรงกับวัตถุประสงค์หลักของเอกสารต้องมีคะแนนสูงที่สุด
-- อย่ากระจายคะแนนที่เหลือให้หมวดอื่นเพียงเพื่อทำให้ผลรวมครบ 100
-- หากข้อมูลไม่เพียงพอ OCR อ่านไม่ชัด หรือไม่สามารถระบุภาระงานได้ ให้ "อื่นๆ" มีคะแนนสูงที่สุด
-- หากเป็นเอกสารทั่วไปที่ไม่เกี่ยวข้องกับภาระงานทั้ง 4 ประเภท ให้ "อื่นๆ" 100.0 ได้
-- ห้ามสร้างหรือสุ่มทศนิยมเพื่อให้คะแนนดูละเอียด
+- ประเมินความสอดคล้องของแต่ละหมวดอย่างอิสระในช่วง 0.0 ถึง 100.0
+- คะแนนของแต่ละหมวดไม่จำเป็นต้องรวมกันเป็น 100
+- 100 หมายถึงเอกสารสอดคล้องกับหมวดนั้นอย่างชัดเจนมาก
+- 0 หมายถึงไม่พบหลักฐานว่าเอกสารเกี่ยวข้องกับหมวดนั้น
+- ให้คะแนนตามหลักฐานจริงจากวัตถุประสงค์ เนื้อหา กลุ่มเป้าหมาย และกิจกรรม
+- ห้ามแจกคะแนนขั้นต่ำให้ทุกหมวด
+- หากเอกสารเกี่ยวข้องกับหลายหมวด แต่ละหมวดสามารถมีคะแนนสูงพร้อมกันได้
+- หากข้อมูลไม่เพียงพอหรือ OCR อ่านไม่ชัด ให้ลดคะแนนของหมวดที่ไม่สามารถยืนยันได้
+- หากไม่ตรงกับ 4 ภาระงานหลัก ให้ "อื่นๆ" มีคะแนนสูง
 - ใช้ทศนิยม 1 ตำแหน่งเมื่อจำเป็น
 
 ตอบ JSON เท่านั้น:
