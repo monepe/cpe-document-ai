@@ -424,56 +424,31 @@ function parseAiJson(text) {
         percentage: result.get(name) ?? 0
     }));
 
-    // ผลรวมคะแนนที่ AI ส่งมา
+    // รวมคะแนนดิบที่ AI ส่งมา
     const total = categories.reduce(
         (sum, item) => sum + item.percentage,
         0
     );
 
     if (total <= 0) {
-        // ถ้า AI ไม่ให้คะแนนที่ใช้ได้
-        // ไม่หารเป็น 20% ทุกหมวด
+        // ถ้า AI ไม่ส่งคะแนนที่ใช้ได้
+        // ให้ "อื่นๆ" เป็น 100% แทนการหาร 20% ทุกหมวด
         categories = categories.map(item => ({
             ...item,
             percentage:
                 item.name === 'อื่นๆ' ? 100 : 0
         }));
     } else {
-        // ปรับสัดส่วนให้ทั้ง 5 หมวดรวมกันเป็น 100%
+        // Normalize ให้คะแนนทั้ง 5 หมวดรวมเป็น 100%
+        // ไม่ปัดทศนิยมตรง Backend
         categories = categories.map(item => ({
             ...item,
             percentage:
-                Math.round(
-                    (item.percentage / total) * 1000
-                ) / 10
+                (item.percentage / total) * 100
         }));
     }
 
-    // แก้เศษจากการปัดทศนิยมให้รวม = 100.0 พอดี
-    const normalizedTotal = categories.reduce(
-        (sum, item) => sum + item.percentage,
-        0
-    );
-
-    const diff =
-        Math.round((100 - normalizedTotal) * 10) / 10;
-
-    if (categories.length && diff !== 0) {
-        const maxIndex = categories.reduce(
-            (best, item, index, arr) =>
-                item.percentage > arr[best].percentage
-                    ? index
-                    : best,
-            0
-        );
-
-        categories[maxIndex].percentage =
-            Math.round(
-                (categories[maxIndex].percentage + diff) * 10
-            ) / 10;
-    }
-
-    // เรียงคะแนนสูงสุดก่อน
+    // เรียงคะแนนจากมากไปน้อย
     categories.sort(
         (a, b) => b.percentage - a.percentage
     );
@@ -617,7 +592,6 @@ app.post(
 - หากเอกสารตรงกับหมวดเดียวอย่างชัดเจน สามารถให้หมวดนั้น 100.0 และหมวดอื่น 0.0 ได้
 - หากไม่ตรงกับ 4 ภาระงานหลัก ให้ "อื่นๆ" มีคะแนนสูงที่สุด
 - หาก OCR ไม่ชัดเจนหรือข้อมูลไม่เพียงพอ ให้เพิ่มสัดส่วนของ "อื่นๆ"
-- ใช้ทศนิยม 1 ตำแหน่งเมื่อจำเป็น
 
 ตอบ JSON เท่านั้น:
 

@@ -314,7 +314,7 @@ function renderCategories(categories, recommendedCategory) {
             <div class="category-progress-row">
 
                 <div class="category-percent">
-                    ${percent.toFixed(1)}%
+                    ${percent.toFixed(2)}%
                 </div>
 
                 <div class="progress-track">
