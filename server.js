@@ -54,6 +54,9 @@ const CATEGORIES = [
 const APP_DRIVE_FOLDER = 'CPE Document AI';
 const pendingUploads = new Map();
 
+const ENABLE_USER_WHITELIST =
+    process.env.ENABLE_USER_WHITELIST === 'true';
+
 /* =====================================================
    OCR WORKER POOL
 ===================================================== */
@@ -147,51 +150,95 @@ passport.deserializeUser((user, done) => done(null, user));
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3000/auth/google/callback'
+    callbackURL:
+        process.env.GOOGLE_CALLBACK_URL ||
+        'http://localhost:3000/auth/google/callback'
 }, async (accessToken, refreshToken, profile, done) => {
+
     try {
-        const email = profile.emails?.[0]?.value?.trim().toLowerCase();
 
-        if (!email)
-            return done(null, false, { message: 'ไม่พบ Gmail จากบัญชี Google นี้' });
+        const email =
+            profile.emails?.[0]?.value?.trim().toLowerCase();
 
-        const [rows] = await db.execute(
-            `SELECT id,email,display_name,role FROM users
-             WHERE LOWER(email)=LOWER(?) LIMIT 1`,
+        if (!email) {
+            return done(null, false, {
+                message: 'ไม่พบ Gmail จากบัญชี Google นี้'
+            });
+        }
+
+        // ค้นหาผู้ใช้จาก Database
+        let [rows] = await db.execute(
+            `SELECT id, email
+             FROM users
+             WHERE LOWER(email) = LOWER(?)
+             LIMIT 1`,
             [email]
         );
 
-        if (!rows.length)
-            return done(null, false, {
-                message: 'อีเมลของคุณไม่มีสิทธิ์เข้าใช้งานระบบนี้!'
-            });
+        /*
+        =====================================================
+        USER WHITELIST
+        =====================================================
+
+        true  = เฉพาะ email ที่มีอยู่ใน users เท่านั้น
+        false = ทุก Google Account เข้าได้
+                และเพิ่ม email ลง users อัตโนมัติ
+        */
+
+        if (ENABLE_USER_WHITELIST) {
+
+            // เปิดระบบตรวจสอบสิทธิ์
+            if (!rows.length) {
+                return done(null, false, {
+                    message:
+                        'อีเมลของคุณไม่มีสิทธิ์เข้าใช้งานระบบนี้!'
+                });
+            }
+
+        } else {
+
+            // ปิดระบบตรวจสอบชั่วคราว
+            // ถ้ายังไม่มี user → เพิ่มเข้า Database เพื่อเก็บข้อมูล
+            if (!rows.length) {
+
+                const [result] = await db.execute(
+                    `INSERT INTO users (email)
+                     VALUES (?)`,
+                    [email]
+                );
+
+                rows = [{
+                    id: result.insertId,
+                    email
+                }];
+
+                console.log(
+                    `👤 เพิ่มผู้ใช้ใหม่อัตโนมัติ: ${email}`
+                );
+            }
+        }
 
         const dbUser = rows[0];
 
-        await db.execute(
-            `UPDATE users SET google_id=?,
-             display_name=CASE
-                WHEN display_name IS NULL OR display_name='' THEN ?
-                ELSE display_name
-             END WHERE id=?`,
-            [profile.id || null, profile.displayName || email, dbUser.id]
-        );
-
+        // Token สำหรับใช้งาน Google Drive
         profile.accessToken = accessToken;
         profile.refreshToken = refreshToken;
 
-        profile.dbUser = {
-            ...dbUser,
-            google_id: profile.id || null,
-            display_name: dbUser.display_name || profile.displayName || email
-        };
+        // ข้อมูลจาก Database
+        profile.dbUser = dbUser;
 
-        done(null, profile);
+        return done(null, profile);
 
     } catch (error) {
-        done(error);
+
+        console.error(
+            '❌ Google Login Error:',
+            error
+        );
+
+        return done(error);
     }
-}));
+}));   
 
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
@@ -222,9 +269,14 @@ app.get('/api/me', checkAuth, (req, res) => {
         user: {
             id: req.user.dbUser?.id,
             email: req.user.dbUser?.email,
-            displayName: req.user.dbUser?.display_name || req.user.displayName,
-            role: req.user.dbUser?.role || 'user',
-            photo: req.user.photos?.[0]?.value || null
+
+            // ชื่อและรูปใช้จาก Google โดยตรง
+            displayName:
+                req.user.displayName ||
+                req.user.dbUser?.email,
+
+            photo:
+                req.user.photos?.[0]?.value || null
         }
     });
 });
