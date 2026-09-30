@@ -3,6 +3,8 @@ require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
+const mammoth = require('mammoth');
+const AdmZip = require('adm-zip');
 const { createWorker } = require('tesseract.js');
 const { Groq } = require('groq-sdk');
 const path = require('path');
@@ -38,8 +40,10 @@ const db = mysql.createPool({
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
-    charset: 'utf8mb4'
+    charset: 'utf8mb4',
+    timezone: '+07:00'
 });
+await db.execute(`SET time_zone = '+07:00'`);
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -202,8 +206,8 @@ passport.use(new GoogleStrategy({
             if (!rows.length) {
 
                 const [result] = await db.execute(
-                    `INSERT INTO users (email)
-                     VALUES (?)`,
+                    `INSERT INTO users (email, created_at)
+                     VALUES (?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))`,
                     [email]
                 );
 
