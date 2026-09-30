@@ -3,7 +3,6 @@ require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
-const mammoth = require('mammoth');
 const AdmZip = require('adm-zip');
 const { createWorker } = require('tesseract.js');
 const { Groq } = require('groq-sdk');
