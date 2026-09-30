@@ -43,7 +43,6 @@ const db = mysql.createPool({
     charset: 'utf8mb4',
     timezone: '+07:00'
 });
-await db.execute(`SET time_zone = '+07:00'`);
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
