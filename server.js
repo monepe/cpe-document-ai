@@ -3,7 +3,6 @@ require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
-const AdmZip = require('adm-zip');
 const { createWorker } = require('tesseract.js');
 const { Groq } = require('groq-sdk');
 const path = require('path');
@@ -19,31 +18,39 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 
 const execFileAsync = promisify(execFile);
-const app = express();
-const PORT = Number(process.env.PORT) || 3000;
-const uploadDir = path.join(__dirname, 'uploads');
 
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+/* =====================================================
+   CONFIG
+===================================================== */
 
-const upload = multer({
-    dest: uploadDir,
-    limits: { fileSize: 50 * 1024 * 1024 }
-});
+const env = process.env;
+const IS_PRODUCTION = env.NODE_ENV === 'production';
 
-const db = mysql.createPool({
-    host: process.env.DB_HOST || '127.0.0.1',
-    port: Number(process.env.DB_PORT) || 3306,
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'document_ai',
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    charset: 'utf8mb4',
-    timezone: '+07:00'
-});
+const PORT = Number(env.PORT) || 3000;
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+const PUBLIC_DIR = path.join(__dirname, 'public');
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const GOOGLE_CALLBACK_URL =
+    env.GOOGLE_CALLBACK_URL || 'http://localhost:3000/auth/google/callback';
+const GOOGLE_SCOPES = [
+    'profile',
+    'email',
+    'https://www.googleapis.com/auth/drive.file'
+];
+
+const ENABLE_USER_WHITELIST = env.ENABLE_USER_WHITELIST === 'true';
+const OCR_POOL_SIZE = Math.max(1, Number(env.OCR_POOL_SIZE) || 2);
+
+const AI_MODEL = 'openai/gpt-oss-20b';
+const APP_DRIVE_FOLDER = 'CPE Document AI';
+
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const SESSION_MAX_AGE = 30 * 60 * 1000;
+const PENDING_TTL = 30 * 60 * 1000;
+const PENDING_SWEEP_INTERVAL = 5 * 60 * 1000;
+
+// เวลาไทย (UTC+7) สำหรับบันทึกลงฐานข้อมูล
+const NOW_TH = 'DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)';
 
 const CATEGORIES = [
     'ภาระงานบริการวิชาการ',
@@ -53,53 +60,41 @@ const CATEGORIES = [
     'อื่นๆ'
 ];
 
-const APP_DRIVE_FOLDER = 'CPE Document AI';
-const pendingUploads = new Map();
-
-const ENABLE_USER_WHITELIST =
-    process.env.ENABLE_USER_WHITELIST === 'true';
+const REQUIRED_TABLES = ['users', 'logs', 'files'];
 
 /* =====================================================
-   OCR WORKER POOL
+   SERVICES
 ===================================================== */
 
-const OCR_POOL_SIZE = Math.max(1, Number(process.env.OCR_POOL_SIZE) || 2);
-const ocrWorkers = [];
-const ocrWaiters = [];
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-async function initOcrPool() {
-    console.log(`⏳ เตรียม OCR workers ${OCR_POOL_SIZE} ตัว...`);
+const app = express();
 
-    for (let i = 0; i < OCR_POOL_SIZE; i++)
-        ocrWorkers.push(await createWorker(['tha', 'eng']));
+const upload = multer({
+    dest: UPLOAD_DIR,
+    limits: { fileSize: MAX_FILE_SIZE }
+});
 
-    console.log('✅ OCR workers พร้อมใช้งาน');
-}
+const db = mysql.createPool({
+    host: env.DB_HOST || '127.0.0.1',
+    port: Number(env.DB_PORT) || 3306,
+    user: env.DB_USER || 'root',
+    password: env.DB_PASSWORD || '',
+    database: env.DB_NAME || 'document_ai',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    charset: 'utf8mb4',
+    timezone: '+07:00'
+});
 
-async function acquireOcrWorker() {
-    if (ocrWorkers.length) return ocrWorkers.pop();
-    return new Promise(resolve => ocrWaiters.push(resolve));
-}
+const groq = new Groq({ apiKey: env.GROQ_API_KEY });
 
-function releaseOcrWorker(worker) {
-    const waiter = ocrWaiters.shift();
-    if (waiter) waiter(worker);
-    else ocrWorkers.push(worker);
-}
-
-async function recognizeText(source) {
-    const worker = await acquireOcrWorker();
-
-    try {
-        const { data: { text } } = await worker.recognize(source);
-        return text;
-    } finally {
-        releaseOcrWorker(worker);
-    }
-}
+// ไฟล์ที่วิเคราะห์แล้วและรอผู้ใช้เลือกหมวด
+const pendingUploads = new Map();
 
 /* =====================================================
-   GENERAL
+   HELPERS
 ===================================================== */
 
 function fixThaiFilename(filename) {
@@ -121,240 +116,59 @@ function cleanupFile(file) {
     }
 }
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+function getUserEmail(req) {
+    return (
+        req.user.dbUser?.email?.toLowerCase() ||
+        req.user.emails?.[0]?.value?.toLowerCase()
+    );
+}
 
-if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
-
-app.use(session({
-    secret: process.env.SESSION_SECRET || 'change-this-session-secret',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-        maxAge: 30 * 60 * 1000,
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: process.env.NODE_ENV === 'production'
-    }
-}));
-
-app.use(flash());
-app.use(passport.initialize());
-app.use(passport.session());
+function sendError(res, status, error, detail) {
+    const body = { error };
+    if (detail !== undefined) body.detail = detail;
+    return res.status(status).json(body);
+}
 
 /* =====================================================
-   GOOGLE LOGIN
+   OCR WORKER POOL
 ===================================================== */
 
-passport.serializeUser((user, done) => done(null, user));
-passport.deserializeUser((user, done) => done(null, user));
+const idleOcrWorkers = [];
+const ocrWaiters = [];
 
-passport.use(new GoogleStrategy({
-    clientID: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL:
-        process.env.GOOGLE_CALLBACK_URL ||
-        'http://localhost:3000/auth/google/callback'
-}, async (accessToken, refreshToken, profile, done) => {
+async function initOcrPool() {
+    console.log(`⏳ เตรียม OCR workers ${OCR_POOL_SIZE} ตัว...`);
+
+    for (let i = 0; i < OCR_POOL_SIZE; i++)
+        idleOcrWorkers.push(await createWorker(['tha', 'eng']));
+
+    console.log('✅ OCR workers พร้อมใช้งาน');
+}
+
+function acquireOcrWorker() {
+    if (idleOcrWorkers.length) return Promise.resolve(idleOcrWorkers.pop());
+    return new Promise(resolve => ocrWaiters.push(resolve));
+}
+
+function releaseOcrWorker(worker) {
+    const waiter = ocrWaiters.shift();
+    if (waiter) waiter(worker);
+    else idleOcrWorkers.push(worker);
+}
+
+async function recognizeText(source) {
+    const worker = await acquireOcrWorker();
 
     try {
-
-        const email =
-            profile.emails?.[0]?.value?.trim().toLowerCase();
-
-        if (!email) {
-            return done(null, false, {
-                message: 'ไม่พบ Gmail จากบัญชี Google นี้'
-            });
-        }
-
-        // ค้นหาผู้ใช้จาก Database
-        let [rows] = await db.execute(
-            `SELECT id, email
-             FROM users
-             WHERE LOWER(email) = LOWER(?)
-             LIMIT 1`,
-            [email]
-        );
-
-        /*
-        =====================================================
-        USER WHITELIST
-        =====================================================
-
-        true  = เฉพาะ email ที่มีอยู่ใน users เท่านั้น
-        false = ทุก Google Account เข้าได้
-                และเพิ่ม email ลง users อัตโนมัติ
-        */
-
-        if (ENABLE_USER_WHITELIST) {
-
-            // เปิดระบบตรวจสอบสิทธิ์
-            if (!rows.length) {
-                return done(null, false, {
-                    message:
-                        'อีเมลของคุณไม่มีสิทธิ์เข้าใช้งานระบบนี้!'
-                });
-            }
-
-        } else {
-
-            // ปิดระบบตรวจสอบชั่วคราว
-            // ถ้ายังไม่มี user → เพิ่มเข้า Database เพื่อเก็บข้อมูล
-            if (!rows.length) {
-
-                const [result] = await db.execute(
-                    `INSERT INTO users (email, created_at)
-                     VALUES (?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))`,
-                    [email]
-                );
-
-                rows = [{
-                    id: result.insertId,
-                    email
-                }];
-
-                console.log(
-                    `👤 เพิ่มผู้ใช้ใหม่อัตโนมัติ: ${email}`
-                );
-            }
-        }
-
-        const dbUser = rows[0];
-
-        // Token สำหรับใช้งาน Google Drive
-        profile.accessToken = accessToken;
-        profile.refreshToken = refreshToken;
-
-        // ข้อมูลจาก Database
-        profile.dbUser = dbUser;
-
-        return done(null, profile);
-
-    } catch (error) {
-
-        console.error(
-            '❌ Google Login Error:',
-            error
-        );
-
-        return done(error);
+        const { data: { text } } = await worker.recognize(source);
+        return text;
+    } finally {
+        releaseOcrWorker(worker);
     }
-}));   
-
-function checkAuth(req, res, next) {
-    if (req.isAuthenticated()) return next();
-    res.redirect('/login.html');
-}
-
-app.get('/auth/google', passport.authenticate('google', {
-    scope: ['profile', 'email', 'https://www.googleapis.com/auth/drive.file'],
-    accessType: 'offline',
-    prompt: 'consent'
-}));
-
-app.get('/auth/google/callback',
-    passport.authenticate('google', {
-        failureRedirect: '/login.html',
-        failureFlash: true
-    }),
-    (req, res) => res.redirect('/index.html')
-);
-
-app.get('/api/auth-error', (req, res) =>
-    res.json({ error: req.flash('error')[0] || null })
-);
-
-app.get('/api/me', checkAuth, (req, res) => {
-    res.json({
-        success: true,
-        user: {
-            id: req.user.dbUser?.id,
-            email: req.user.dbUser?.email,
-
-            // ชื่อและรูปใช้จาก Google โดยตรง
-            displayName:
-                req.user.displayName ||
-                req.user.dbUser?.email,
-
-            photo:
-                req.user.photos?.[0]?.value || null
-        }
-    });
-});
-
-app.get('/api/logout', (req, res, next) => {
-    req.logout(error => {
-        if (error) return next(error);
-        req.session.destroy(() => res.redirect('/login.html'));
-    });
-});
-
-app.get('/index.html', checkAuth);
-app.get('/', checkAuth, (req, res) =>
-    res.sendFile(path.join(__dirname, 'public', 'index.html'))
-);
-
-app.use(express.static(path.join(__dirname, 'public')));
-
-/* =====================================================
-   GOOGLE DRIVE
-===================================================== */
-
-function escapeDriveQuery(value) {
-    return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-}
-
-async function findDriveFolder(name, parentId, drive) {
-    const folderName = escapeDriveQuery(name);
-
-    let q =
-        `name='${folderName}' and ` +
-        `mimeType='application/vnd.google-apps.folder' and trashed=false`;
-
-    q += parentId
-        ? ` and '${parentId}' in parents`
-        : ` and 'root' in parents`;
-
-    const response = await drive.files.list({
-        q,
-        spaces: 'drive',
-        fields: 'files(id,name,parents)',
-        pageSize: 10
-    });
-
-    return response.data.files?.[0] || null;
-}
-
-async function createDriveFolder(name, parentId, drive) {
-    const response = await drive.files.create({
-        resource: {
-            name,
-            mimeType: 'application/vnd.google-apps.folder',
-            parents: [parentId || 'root']
-        },
-        fields: 'id,name,parents'
-    });
-
-    return response.data;
-}
-
-async function getOrCreateDriveFolder(name, parentId, drive) {
-    const folder = await findDriveFolder(name, parentId, drive);
-    if (folder) return folder.id;
-
-    return (await createDriveFolder(name, parentId, drive)).id;
-}
-
-async function getUserCategoryFolder(category, drive) {
-    const mainFolder =
-        await getOrCreateDriveFolder(APP_DRIVE_FOLDER, null, drive);
-
-    return getOrCreateDriveFolder(category, mainFolder, drive);
 }
 
 /* =====================================================
-   PDF -> JPEG
+   FILE CONVERSION (PDF / HEIC -> JPEG)
 ===================================================== */
 
 async function convertPdfFirstPage(filePath) {
@@ -383,170 +197,42 @@ async function convertPdfFirstPage(filePath) {
     return outputFile;
 }
 
-/* =====================================================
-   PARSE AI RESULT
-===================================================== */
+async function convertHeicToJpeg(filePath) {
+    const buffer = await heicConvert({
+        buffer: fs.readFileSync(filePath),
+        format: 'JPEG',
+        quality: 0.9
+    });
 
-function parseAiJson(text) {
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
+    const outputFile = filePath + '_converted.jpg';
+    fs.writeFileSync(outputFile, buffer);
 
-    if (start === -1 || end === -1) {
-        throw new Error('AI ไม่ได้ส่ง JSON กลับมา');
+    return outputFile;
+}
+
+/**
+ * คืนค่าเป็นไฟล์ที่ OCR อ่านได้ และไฟล์ชั่วคราว (ถ้ามี) ที่ต้องลบทีหลัง
+ */
+async function prepareOcrSource(file, ext) {
+    if (ext === 'pdf' || file.mimetype === 'application/pdf') {
+        const tempFile = await convertPdfFirstPage(file.path);
+        return { source: tempFile, tempFile };
     }
 
-    const parsed = JSON.parse(
-        text.slice(start, end + 1)
-    );
-
-    const result = new Map();
-
-    if (Array.isArray(parsed.categories)) {
-        for (const item of parsed.categories) {
-            if (
-                !item ||
-                !CATEGORIES.includes(item.name)
-            ) {
-                continue;
-            }
-
-            const value = Number(item.percentage);
-
-            result.set(
-                item.name,
-                Number.isFinite(value)
-                    ? Math.max(0, value)
-                    : 0
-            );
-        }
+    if (ext === 'heic' || ext === 'heif') {
+        const tempFile = await convertHeicToJpeg(file.path);
+        return { source: tempFile, tempFile };
     }
 
-    let categories = CATEGORIES.map(name => ({
-        name,
-        percentage: result.get(name) ?? 0
-    }));
-
-    // รวมคะแนนดิบที่ AI ส่งมา
-    const total = categories.reduce(
-        (sum, item) => sum + item.percentage,
-        0
-    );
-
-    if (total <= 0) {
-        // ถ้า AI ไม่ส่งคะแนนที่ใช้ได้
-        // ให้ "อื่นๆ" เป็น 100% แทนการหาร 20% ทุกหมวด
-        categories = categories.map(item => ({
-            ...item,
-            percentage:
-                item.name === 'อื่นๆ' ? 100 : 0
-        }));
-    } else {
-        // Normalize ให้คะแนนทั้ง 5 หมวดรวมเป็น 100%
-        // ไม่ปัดทศนิยมตรง Backend
-        categories = categories.map(item => ({
-            ...item,
-            percentage:
-                (item.percentage / total) * 100
-        }));
-    }
-
-    // เรียงคะแนนจากมากไปน้อย
-    categories.sort(
-        (a, b) => b.percentage - a.percentage
-    );
-
-    return {
-        reason:
-            typeof parsed.reason === 'string'
-                ? parsed.reason.trim()
-                : '',
-        categories
-    };
+    return { source: file.path, tempFile: null };
 }
 
 /* =====================================================
-   CLASSIFY
+   AI CLASSIFICATION
 ===================================================== */
 
-app.post(
-    '/api/classify',
-    checkAuth,
-    upload.single('image'),
-    async (req, res) => {
-
-        if (!req.file)
-            return res.status(400).json({
-                error: 'กรุณาอัปโหลดไฟล์'
-            });
-
-        req.file.originalname =
-            fixThaiFilename(req.file.originalname);
-
-        const filePath = req.file.path;
-
-        const ext = req.file.originalname
-            .split('.')
-            .pop()
-            .toLowerCase();
-
-        let ocrSource = filePath;
-        let tempFile = null;
-
-        try {
-
-            /* PDF */
-
-            if (
-                ext === 'pdf' ||
-                req.file.mimetype === 'application/pdf'
-            ) {
-                tempFile =
-                    await convertPdfFirstPage(filePath);
-
-                ocrSource = tempFile;
-
-            /* HEIC */
-
-            } else if (
-                ext === 'heic' ||
-                ext === 'heif'
-            ) {
-
-                const buffer = await heicConvert({
-                    buffer: fs.readFileSync(filePath),
-                    format: 'JPEG',
-                    quality: 0.9
-                });
-
-                tempFile =
-                    filePath + '_converted.jpg';
-
-                fs.writeFileSync(tempFile, buffer);
-
-                ocrSource = tempFile;
-            }
-
-            /* OCR */
-
-            const text =
-                await recognizeText(ocrSource);
-
-            cleanupFile(tempFile);
-            tempFile = null;
-
-            const trimmedText = text.trim();
-
-            if (!trimmedText) {
-                cleanupFile(filePath);
-
-                return res.status(400).json({
-                    error: 'ไม่พบข้อความในเอกสาร'
-                });
-            }
-
-            /* AI */
-
-            const prompt = `
+function buildPrompt(text) {
+    return `
 คุณคือผู้เชี่ยวชาญด้านการจำแนกภาระงานอาจารย์ของมหาวิทยาลัย
 วิเคราะห์วัตถุประสงค์ สาระสำคัญ กลุ่มเป้าหมาย และกิจกรรมหลักของเอกสาร
 แล้วประเมิน "คะแนนความสอดคล้อง" กับหมวดทั้ง 5 หมวด
@@ -609,346 +295,507 @@ app.post(
 }
 
 ข้อความจากเอกสาร:
-"""${trimmedText}"""
+"""${text}"""
 `;
+}
 
-            const completion =
-                await groq.chat.completions.create({
-                    messages: [{
-                        role: 'user',
-                        content: prompt
-                    }],
-                    model: 'openai/gpt-oss-20b',
-                    temperature: 0
-                });
+/**
+ * แปลงข้อความจาก AI เป็นคะแนน 5 หมวดที่รวมได้ 100% เรียงจากมากไปน้อย
+ * (ไม่ปัดทศนิยมที่ Backend ให้หน้าเว็บปัดเอง)
+ */
+function parseAiJson(text) {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
 
-            const aiResult = parseAiJson(
-                completion.choices?.[0]?.message?.content || ''
-            );
+    if (start === -1 || end === -1)
+        throw new Error('AI ไม่ได้ส่ง JSON กลับมา');
 
-            /* เก็บไฟล์รอยืนยัน */
+    const parsed = JSON.parse(text.slice(start, end + 1));
 
-            const uploadToken = crypto.randomUUID();
+    const scores = new Map();
 
-            const userEmail =
-                req.user.dbUser?.email?.toLowerCase() ||
-                req.user.emails?.[0]?.value?.toLowerCase();
+    if (Array.isArray(parsed.categories)) {
+        for (const item of parsed.categories) {
+            if (!item || !CATEGORIES.includes(item.name)) continue;
 
-            pendingUploads.set(uploadToken, {
-                filePath,
-                originalFileName: req.file.originalname,
-                originalMimeType: req.file.mimetype,
-                userEmail,
-                userId: req.user.dbUser?.id,
-                categories: aiResult.categories,
-                reason: aiResult.reason,
-                createdAt: Date.now()
-            });
-
-            res.json({
-                success: true,
-                uploadToken,
-                reason: aiResult.reason,
-                categories: aiResult.categories,
-                recommendedCategory:
-                    aiResult.categories[0]?.name || null
-            });
-
-        } catch (error) {
-
-            console.error(
-                '❌ Classification Error:',
-                error
-            );
-
-            cleanupFile(filePath);
-            cleanupFile(tempFile);
-
-            res.status(500).json({
-                error: 'ระบบวิเคราะห์เอกสารผิดพลาด',
-                detail: error.message
-            });
+            const value = Number(item.percentage);
+            scores.set(item.name, Number.isFinite(value) ? Math.max(0, value) : 0);
         }
     }
-);
+
+    const raw = CATEGORIES.map(name => ({
+        name,
+        percentage: scores.get(name) ?? 0
+    }));
+
+    const total = raw.reduce((sum, item) => sum + item.percentage, 0);
+
+    // AI ไม่ส่งคะแนนที่ใช้ได้ → ให้ "อื่นๆ" 100% แทนการหารเท่ากันทุกหมวด
+    const categories = raw.map(item => ({
+        ...item,
+        percentage: total <= 0
+            ? (item.name === 'อื่นๆ' ? 100 : 0)
+            : (item.percentage / total) * 100
+    }));
+
+    categories.sort((a, b) => b.percentage - a.percentage);
+
+    return {
+        reason: typeof parsed.reason === 'string' ? parsed.reason.trim() : '',
+        categories
+    };
+}
+
+async function classifyText(text) {
+    const completion = await groq.chat.completions.create({
+        messages: [{ role: 'user', content: buildPrompt(text) }],
+        model: AI_MODEL,
+        temperature: 0
+    });
+
+    return parseAiJson(completion.choices?.[0]?.message?.content || '');
+}
 
 /* =====================================================
-   UPLOAD SELECTED CATEGORY
+   GOOGLE DRIVE
 ===================================================== */
 
-app.post(
-    '/api/upload-selected-category',
-    checkAuth,
-    async (req, res) => {
+const FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
 
-        const { uploadToken, category } = req.body;
+function createDriveClient(user) {
+    const auth = new google.auth.OAuth2(
+        env.GOOGLE_CLIENT_ID,
+        env.GOOGLE_CLIENT_SECRET,
+        GOOGLE_CALLBACK_URL
+    );
 
-        if (!uploadToken || !category)
-            return res.status(400).json({
-                error: 'ข้อมูลการอัปโหลดไม่ครบ'
-            });
+    auth.setCredentials({
+        access_token: user.accessToken,
+        refresh_token: user.refreshToken || undefined
+    });
 
-        if (!CATEGORIES.includes(category))
-            return res.status(400).json({
-                error: 'หมวดหมู่ไม่ถูกต้อง'
-            });
+    return google.drive({ version: 'v3', auth });
+}
 
-        const pending =
-            pendingUploads.get(uploadToken);
+function escapeDriveQuery(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
 
-        if (!pending)
-            return res.status(404).json({
-                error: 'ไม่พบไฟล์ที่รออัปโหลด กรุณาวิเคราะห์เอกสารใหม่อีกครั้ง'
-            });
+async function findDriveFolder(drive, name, parentId) {
+    const q =
+        `name='${escapeDriveQuery(name)}' and ` +
+        `mimeType='${FOLDER_MIME_TYPE}' and trashed=false and ` +
+        `'${parentId || 'root'}' in parents`;
 
-        const currentEmail =
-            req.user.dbUser?.email?.toLowerCase() ||
-            req.user.emails?.[0]?.value?.toLowerCase();
+    const response = await drive.files.list({
+        q,
+        spaces: 'drive',
+        fields: 'files(id,name,parents)',
+        pageSize: 10
+    });
 
-        if (pending.userEmail !== currentEmail)
-            return res.status(403).json({
-                error: 'ไม่มีสิทธิ์อัปโหลดไฟล์นี้'
-            });
+    return response.data.files?.[0] || null;
+}
 
-        if (!fs.existsSync(pending.filePath)) {
-            pendingUploads.delete(uploadToken);
+async function createDriveFolder(drive, name, parentId) {
+    const response = await drive.files.create({
+        requestBody: {
+            name,
+            mimeType: FOLDER_MIME_TYPE,
+            parents: [parentId || 'root']
+        },
+        fields: 'id,name,parents'
+    });
 
-            return res.status(404).json({
-                error: 'ไฟล์ชั่วคราวหาย กรุณาวิเคราะห์ใหม่'
-            });
-        }
+    return response.data;
+}
 
-        try {
+async function getOrCreateDriveFolder(drive, name, parentId) {
+    const folder =
+        (await findDriveFolder(drive, name, parentId)) ||
+        (await createDriveFolder(drive, name, parentId));
 
-            const oauth2Client =
-                new google.auth.OAuth2(
-                    process.env.GOOGLE_CLIENT_ID,
-                    process.env.GOOGLE_CLIENT_SECRET,
-                    process.env.GOOGLE_CALLBACK_URL ||
-                    'http://localhost:3000/auth/google/callback'
-                );
+    return folder.id;
+}
 
-            oauth2Client.setCredentials({
-                access_token: req.user.accessToken,
-                refresh_token:
-                    req.user.refreshToken || undefined
-            });
+async function getCategoryFolderId(drive, category) {
+    const mainFolderId = await getOrCreateDriveFolder(drive, APP_DRIVE_FOLDER, null);
+    return getOrCreateDriveFolder(drive, category, mainFolderId);
+}
 
-            const drive =
-                google.drive({
-                    version: 'v3',
-                    auth: oauth2Client
-                });
+async function uploadToDrive(drive, { folderId, name, mimeType, filePath }) {
+    const response = await drive.files.create({
+        requestBody: { name, parents: [folderId] },
+        media: { mimeType, body: fs.createReadStream(filePath) },
+        fields: 'id,name'
+    });
 
-            const folderId =
-                await getUserCategoryFolder(
-                    category,
-                    drive
-                );
+    return response.data;
+}
 
-            const response =
-                await drive.files.create({
-                    resource: {
-                        name: pending.originalFileName,
-                        parents: [folderId]
-                    },
+/* =====================================================
+   DATABASE
+===================================================== */
 
-                    media: {
-                        mimeType:
-                            pending.originalMimeType,
+async function findUserByEmail(email) {
+    const [rows] = await db.execute(
+        `SELECT id, email
+         FROM users
+         WHERE LOWER(email) = LOWER(?)
+         LIMIT 1`,
+        [email]
+    );
 
-                        body:
-                            fs.createReadStream(
-                                pending.filePath
-                            )
-                    },
+    return rows[0] || null;
+}
 
-                    fields: 'id,name'
-                });
+async function createUser(email) {
+    const [result] = await db.execute(
+        `INSERT INTO users (email, created_at)
+         VALUES (?, ${NOW_TH})`,
+        [email]
+    );
 
-            const userId =
-                pending.userId ||
-                req.user.dbUser?.id;
+    return { id: result.insertId, email };
+}
 
-            if (!userId)
-                throw new Error(
-                    'ไม่พบ user_id ของผู้ใช้งาน'
-                );
+async function saveUploadRecord({ userId, fileName, category, driveFileId, confidence }) {
+    const connection = await db.getConnection();
 
-            const selected =
-                pending.categories.find(
-                    item =>
-                        item.name === category
-                );
+    try {
+        await connection.beginTransaction();
 
-            const confidence =
-                selected
-                    ? Number(selected.percentage)
-                    : null;
+        await connection.execute(
+            `INSERT INTO files
+             (user_id, original_name, category, drive_file_id, created_at)
+             VALUES (?, ?, ?, ?, ${NOW_TH})`,
+            [userId, fileName, category, driveFileId]
+        );
 
-            /* DATABASE */
+        await connection.execute(
+            `INSERT INTO logs
+             (user_id, category, confidence, created_at)
+             VALUES (?, ?, ?, ${NOW_TH})`,
+            [userId, category, confidence]
+        );
 
-            const connection =
-                await db.getConnection();
-
-            try {
-
-                await connection.beginTransaction();
-
-                await connection.execute(
-                    `INSERT INTO files
-                    (user_id,original_name,category,drive_file_id,created_at)
-                    VALUES (?,?,?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 7 HOUR))`,
-                    [
-                        userId,
-                        pending.originalFileName,
-                        category,
-                        response.data.id
-                    ]
-                );
-
-                await connection.execute(
-                    `INSERT INTO logs
-                    (user_id,category,confidence,created_at)
-                    VALUES (?,?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 7 HOUR))`,
-                    [
-                        userId,
-                        category,
-                        confidence
-                    ]
-                );
-
-                await connection.commit();
-
-            } catch (error) {
-
-                await connection.rollback();
-                throw error;
-
-            } finally {
-
-                connection.release();
-            }
-
-            cleanupFile(pending.filePath);
-            pendingUploads.delete(uploadToken);
-
-            res.json({
-                success: true,
-                category,
-                confidence,
-                driveFileId: response.data.id,
-                message:
-                    `จัดเก็บเอกสารเข้า Google Drive หมวด [${category}] เรียบร้อยแล้ว`
-            });
-
-        } catch (error) {
-
-            console.error(
-                '❌ Upload Error:',
-                error
-            );
-
-            res.status(500).json({
-                error:
-                    'อัปโหลด Google Drive ไม่สำเร็จ',
-                detail:
-                    error.message
-            });
-        }
+        await connection.commit();
+    } catch (error) {
+        await connection.rollback();
+        throw error;
+    } finally {
+        connection.release();
     }
+}
+
+async function assertDatabaseReady() {
+    const connection = await db.getConnection();
+    connection.release();
+    console.log('✅ เชื่อมต่อ MySQL สำเร็จ');
+
+    for (const table of REQUIRED_TABLES) {
+        const [rows] = await db.execute(`SHOW TABLES LIKE '${table}'`);
+        if (!rows.length) throw new Error(`ไม่พบตาราง ${table}`);
+    }
+}
+
+/* =====================================================
+   MIDDLEWARE
+===================================================== */
+
+if (IS_PRODUCTION) app.set('trust proxy', 1);
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.use(session({
+    secret: env.SESSION_SECRET || 'change-this-session-secret',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        maxAge: SESSION_MAX_AGE,
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: IS_PRODUCTION
+    }
+}));
+
+app.use(flash());
+app.use(passport.initialize());
+app.use(passport.session());
+
+function checkAuth(req, res, next) {
+    if (req.isAuthenticated()) return next();
+    res.redirect('/login.html');
+}
+
+/* =====================================================
+   GOOGLE LOGIN
+===================================================== */
+
+passport.serializeUser((user, done) => done(null, user));
+passport.deserializeUser((user, done) => done(null, user));
+
+/**
+ * ENABLE_USER_WHITELIST
+ *   true  = เฉพาะ email ที่มีอยู่ใน users เท่านั้น
+ *   false = ทุก Google Account เข้าได้ และเพิ่ม email ลง users อัตโนมัติ
+ */
+async function verifyGoogleUser(accessToken, refreshToken, profile, done) {
+    try {
+        const email = profile.emails?.[0]?.value?.trim().toLowerCase();
+
+        if (!email)
+            return done(null, false, { message: 'ไม่พบ Gmail จากบัญชี Google นี้' });
+
+        let dbUser = await findUserByEmail(email);
+
+        if (!dbUser) {
+            if (ENABLE_USER_WHITELIST)
+                return done(null, false, {
+                    message: 'อีเมลของคุณไม่มีสิทธิ์เข้าใช้งานระบบนี้!'
+                });
+
+            dbUser = await createUser(email);
+            console.log(`👤 เพิ่มผู้ใช้ใหม่อัตโนมัติ: ${email}`);
+        }
+
+        // Token สำหรับ Google Drive และข้อมูลผู้ใช้จาก Database
+        profile.accessToken = accessToken;
+        profile.refreshToken = refreshToken;
+        profile.dbUser = dbUser;
+
+        return done(null, profile);
+    } catch (error) {
+        console.error('❌ Google Login Error:', error);
+        return done(error);
+    }
+}
+
+passport.use(new GoogleStrategy({
+    clientID: env.GOOGLE_CLIENT_ID,
+    clientSecret: env.GOOGLE_CLIENT_SECRET,
+    callbackURL: GOOGLE_CALLBACK_URL
+}, verifyGoogleUser));
+
+/* =====================================================
+   AUTH & PAGE ROUTES
+===================================================== */
+
+app.get('/auth/google', passport.authenticate('google', {
+    scope: GOOGLE_SCOPES,
+    accessType: 'offline',
+    prompt: 'consent'
+}));
+
+app.get('/auth/google/callback',
+    passport.authenticate('google', {
+        failureRedirect: '/login.html',
+        failureFlash: true
+    }),
+    (req, res) => res.redirect('/index.html')
 );
+
+app.get('/api/auth-error', (req, res) =>
+    res.json({ error: req.flash('error')[0] || null })
+);
+
+app.get('/api/me', checkAuth, (req, res) => {
+    res.json({
+        success: true,
+        user: {
+            id: req.user.dbUser?.id,
+            email: req.user.dbUser?.email,
+            displayName: req.user.displayName || req.user.dbUser?.email,
+            photo: req.user.photos?.[0]?.value || null
+        }
+    });
+});
+
+app.get('/api/logout', (req, res, next) => {
+    req.logout(error => {
+        if (error) return next(error);
+        req.session.destroy(() => res.redirect('/login.html'));
+    });
+});
+
+app.get('/index.html', checkAuth);
+app.get('/', checkAuth, (req, res) =>
+    res.sendFile(path.join(PUBLIC_DIR, 'index.html'))
+);
+
+app.use(express.static(PUBLIC_DIR));
+
+/* =====================================================
+   API: CLASSIFY
+===================================================== */
+
+app.post('/api/classify', checkAuth, upload.single('image'), async (req, res) => {
+    if (!req.file)
+        return sendError(res, 400, 'กรุณาอัปโหลดไฟล์');
+
+    req.file.originalname = fixThaiFilename(req.file.originalname);
+
+    const filePath = req.file.path;
+    const ext = req.file.originalname.split('.').pop().toLowerCase();
+
+    let tempFile = null;
+
+    try {
+        const ocr = await prepareOcrSource(req.file, ext);
+        tempFile = ocr.tempFile;
+
+        const text = await recognizeText(ocr.source);
+
+        cleanupFile(tempFile);
+        tempFile = null;
+
+        const trimmedText = text.trim();
+
+        if (!trimmedText) {
+            cleanupFile(filePath);
+            return sendError(res, 400, 'ไม่พบข้อความในเอกสาร');
+        }
+
+        const { reason, categories } = await classifyText(trimmedText);
+
+        const uploadToken = crypto.randomUUID();
+
+        pendingUploads.set(uploadToken, {
+            filePath,
+            originalFileName: req.file.originalname,
+            originalMimeType: req.file.mimetype,
+            userEmail: getUserEmail(req),
+            userId: req.user.dbUser?.id,
+            categories,
+            reason,
+            createdAt: Date.now()
+        });
+
+        res.json({
+            success: true,
+            uploadToken,
+            reason,
+            categories,
+            recommendedCategory: categories[0]?.name || null
+        });
+    } catch (error) {
+        console.error('❌ Classification Error:', error);
+
+        cleanupFile(filePath);
+        cleanupFile(tempFile);
+
+        sendError(res, 500, 'ระบบวิเคราะห์เอกสารผิดพลาด', error.message);
+    }
+});
+
+/* =====================================================
+   API: UPLOAD SELECTED CATEGORY
+===================================================== */
+
+app.post('/api/upload-selected-category', checkAuth, async (req, res) => {
+    const { uploadToken, category } = req.body;
+
+    if (!uploadToken || !category)
+        return sendError(res, 400, 'ข้อมูลการอัปโหลดไม่ครบ');
+
+    if (!CATEGORIES.includes(category))
+        return sendError(res, 400, 'หมวดหมู่ไม่ถูกต้อง');
+
+    const pending = pendingUploads.get(uploadToken);
+
+    if (!pending)
+        return sendError(
+            res, 404,
+            'ไม่พบไฟล์ที่รออัปโหลด กรุณาวิเคราะห์เอกสารใหม่อีกครั้ง'
+        );
+
+    if (pending.userEmail !== getUserEmail(req))
+        return sendError(res, 403, 'ไม่มีสิทธิ์อัปโหลดไฟล์นี้');
+
+    if (!fs.existsSync(pending.filePath)) {
+        pendingUploads.delete(uploadToken);
+        return sendError(res, 404, 'ไฟล์ชั่วคราวหาย กรุณาวิเคราะห์ใหม่');
+    }
+
+    try {
+        const drive = createDriveClient(req.user);
+        const folderId = await getCategoryFolderId(drive, category);
+
+        const uploaded = await uploadToDrive(drive, {
+            folderId,
+            name: pending.originalFileName,
+            mimeType: pending.originalMimeType,
+            filePath: pending.filePath
+        });
+
+        const userId = pending.userId || req.user.dbUser?.id;
+
+        if (!userId) throw new Error('ไม่พบ user_id ของผู้ใช้งาน');
+
+        const selected = pending.categories.find(item => item.name === category);
+        const confidence = selected ? Number(selected.percentage) : null;
+
+        await saveUploadRecord({
+            userId,
+            fileName: pending.originalFileName,
+            category,
+            driveFileId: uploaded.id,
+            confidence
+        });
+
+        cleanupFile(pending.filePath);
+        pendingUploads.delete(uploadToken);
+
+        res.json({
+            success: true,
+            category,
+            confidence,
+            driveFileId: uploaded.id,
+            message: `จัดเก็บเอกสารเข้า Google Drive หมวด [${category}] เรียบร้อยแล้ว`
+        });
+    } catch (error) {
+        console.error('❌ Upload Error:', error);
+
+        sendError(res, 500, 'อัปโหลด Google Drive ไม่สำเร็จ', error.message);
+    }
+});
 
 /* =====================================================
    CLEAN TEMP FILES
 ===================================================== */
 
-setInterval(() => {
+function startPendingSweeper() {
+    setInterval(() => {
+        const now = Date.now();
 
-    const now = Date.now();
-
-    for (const [token, pending] of pendingUploads) {
-
-        if (
-            now - pending.createdAt >
-            30 * 60 * 1000
-        ) {
-
-            cleanupFile(pending.filePath);
-            pendingUploads.delete(token);
+        for (const [token, pending] of pendingUploads) {
+            if (now - pending.createdAt > PENDING_TTL) {
+                cleanupFile(pending.filePath);
+                pendingUploads.delete(token);
+            }
         }
-    }
-
-}, 5 * 60 * 1000).unref();
+    }, PENDING_SWEEP_INTERVAL).unref();
+}
 
 /* =====================================================
    START SERVER
 ===================================================== */
 
 async function startServer() {
-
     try {
+        await assertDatabaseReady();
 
-        const connection =
-            await db.getConnection();
-
-        console.log(
-            '✅ เชื่อมต่อ MySQL สำเร็จ'
-        );
-
-        connection.release();
-
-        const [users] =
-            await db.execute(
-                `SHOW TABLES LIKE 'users'`
-            );
-
-        const [logs] =
-            await db.execute(
-                `SHOW TABLES LIKE 'logs'`
-            );
-
-        const [files] =
-            await db.execute(
-                `SHOW TABLES LIKE 'files'`
-            );
-
-        if (!users.length)
-            throw new Error(
-                'ไม่พบตาราง users'
-            );
-
-        if (!logs.length)
-            throw new Error(
-                'ไม่พบตาราง logs'
-            );
-
-        if (!files.length)
-            throw new Error(
-                'ไม่พบตาราง files'
-            );
-
-        /* เตรียม OCR ก่อนเปิด Server */
-
+        // เตรียม OCR ก่อนเปิด Server
         await initOcrPool();
 
-        app.listen(
-            PORT,
-            '0.0.0.0',
-            () => {
-                console.log(
-                    `🚀 Server รันอยู่ที่ port ${PORT}`
-                );
-            }
-        );
+        startPendingSweeper();
 
+        app.listen(PORT, '0.0.0.0', () =>
+            console.log(`🚀 Server รันอยู่ที่ port ${PORT}`)
+        );
     } catch (error) {
-
-        console.error(
-            '❌ Start Server Error:',
-            error.message
-        );
-
+        console.error('❌ Start Server Error:', error.message);
         process.exit(1);
     }
 }
