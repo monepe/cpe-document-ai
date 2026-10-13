@@ -1,3 +1,4 @@
+
 const imageInput = document.getElementById('imageInput');
 const dropArea = document.getElementById('dropArea');
 const fileName = document.getElementById('fileName');
@@ -23,11 +24,15 @@ const successPopup = document.getElementById('successPopup');
 const successPopupText = document.getElementById('successPopupText');
 const successPopupButton = document.getElementById('successPopupButton');
 
+// Popup Loading Google Drive
+const driveLoadingPopup = document.getElementById('driveLoadingPopup');
+const driveLoadingText = document.getElementById('driveLoadingText');
+
 let currentUploadToken = null;
 let pendingCategory = null;
 let isUploading = false;
 
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // จำกัดไฟล์ 20 MB
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
 
 // ========================================
@@ -37,7 +42,6 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024; // จำกัดไฟล์ 20 MB
 dropArea.addEventListener('click', () => {
     imageInput.click();
 });
-
 
 imageInput.addEventListener('change', () => {
 
@@ -51,7 +55,6 @@ imageInput.addEventListener('change', () => {
     }
 
     showSelectedFile(file);
-
 });
 
 
@@ -62,28 +65,20 @@ imageInput.addEventListener('change', () => {
 ['dragenter', 'dragover'].forEach(eventName => {
 
     dropArea.addEventListener(eventName, e => {
-
         e.preventDefault();
-
         dropArea.classList.add('dragging');
-
     });
 
 });
-
 
 ['dragleave', 'drop'].forEach(eventName => {
 
     dropArea.addEventListener(eventName, e => {
-
         e.preventDefault();
-
         dropArea.classList.remove('dragging');
-
     });
 
 });
-
 
 dropArea.addEventListener('drop', e => {
 
@@ -96,13 +91,11 @@ dropArea.addEventListener('drop', e => {
     if (!validateFileSize(file)) return;
 
     const transfer = new DataTransfer();
-
     transfer.items.add(file);
 
     imageInput.files = transfer.files;
 
     showSelectedFile(file);
-
 });
 
 
@@ -115,15 +108,13 @@ function validateFileSize(file) {
     if (file.size > MAX_FILE_SIZE) {
 
         alert(
-            'ไฟล์มีขนาดใหญ่เกินไป\nกรุณาเลือกไฟล์ขนาดไม่เกิน 20 MB'
+            'ไฟล์มีขนาดใหญ่เกินไป\nกรุณาเลือกไฟล์ขนาดไม่เกิน 50 MB'
         );
 
         return false;
-
     }
 
     return true;
-
 }
 
 
@@ -145,7 +136,6 @@ function showSelectedFile(file) {
     reasonBox.textContent = '';
 
     resetStatus();
-
 }
 
 
@@ -157,12 +147,12 @@ uploadForm.addEventListener('submit', async e => {
 
     e.preventDefault();
 
+    if (isUploading) return;
+
     if (!imageInput.files.length) {
 
         alert('กรุณาเลือกไฟล์ก่อนวิเคราะห์');
-
         return;
-
     }
 
     const file = imageInput.files[0];
@@ -170,7 +160,6 @@ uploadForm.addEventListener('submit', async e => {
     if (!validateFileSize(file)) return;
 
     const formData = new FormData();
-
     formData.append('image', file);
 
     startLoading();
@@ -178,11 +167,8 @@ uploadForm.addEventListener('submit', async e => {
     try {
 
         const res = await fetch('/api/classify', {
-
             method: 'POST',
-
             body: formData
-
         });
 
         const data = await res.json();
@@ -193,7 +179,6 @@ uploadForm.addEventListener('submit', async e => {
                 data.error ||
                 'วิเคราะห์เอกสารไม่สำเร็จ'
             );
-
         }
 
         currentUploadToken = data.uploadToken;
@@ -212,13 +197,9 @@ uploadForm.addEventListener('submit', async e => {
         if (window.innerWidth <= 900) {
 
             resultBox.scrollIntoView({
-
                 behavior: 'smooth',
-
                 block: 'start'
-
             });
-
         }
 
     } catch (err) {
@@ -233,9 +214,7 @@ uploadForm.addEventListener('submit', async e => {
     } finally {
 
         stopLoading();
-
     }
-
 });
 
 
@@ -260,7 +239,6 @@ function renderCategories(categories, recommendedCategory) {
             '<div class="reason-box">ไม่พบผลการจำแนกหมวดหมู่</div>';
 
         return;
-
     }
 
     const recommended =
@@ -280,8 +258,7 @@ function renderCategories(categories, recommendedCategory) {
         const isRecommended =
             item.name === recommended;
 
-        const card =
-            document.createElement('div');
+        const card = document.createElement('div');
 
         card.className =
             `category-card${isRecommended ? ' recommended' : ''}`;
@@ -310,7 +287,6 @@ function renderCategories(categories, recommendedCategory) {
 
             </div>
 
-
             <div class="category-progress-row">
 
                 <div class="category-percent">
@@ -335,7 +311,6 @@ function renderCategories(categories, recommendedCategory) {
 
             </div>
 
-
             <div class="category-description">
 
                 ${
@@ -345,29 +320,20 @@ function renderCategories(categories, recommendedCategory) {
                 }
 
             </div>
-
         `;
 
         const button =
-            card.querySelector(
-                '.btn-confirm-category'
-            );
+            card.querySelector('.btn-confirm-category');
 
-        button.addEventListener(
-            'click',
-            event => {
+        button.addEventListener('click', event => {
 
-                event.stopPropagation();
+            event.stopPropagation();
 
-                confirmCategory(item.name);
-
-            }
-        );
+            confirmCategory(item.name);
+        });
 
         categoryList.appendChild(card);
-
     });
-
 }
 
 
@@ -377,6 +343,8 @@ function renderCategories(categories, recommendedCategory) {
 
 function confirmCategory(category) {
 
+    if (isUploading) return;
+
     if (!currentUploadToken) {
 
         alert(
@@ -384,69 +352,96 @@ function confirmCategory(category) {
         );
 
         return;
-
     }
 
     pendingCategory = category;
 
-    confirmCategoryName.textContent =
-        category;
+    confirmCategoryName.textContent = category;
 
     confirmPopup.classList.add('show');
-
 }
 
 
+// ========================================
 // ปิด Popup ยืนยัน
+// ========================================
+
 function closeConfirmPopup() {
 
     confirmPopup.classList.remove('show');
 
     pendingCategory = null;
-
 }
 
 
-// กดยกเลิก
+// ========================================
+// ปุ่มยกเลิก
+// ========================================
+
 confirmCancelButton.addEventListener(
     'click',
     closeConfirmPopup
 );
 
 
-// กดยืนยัน
-confirmOkButton.addEventListener(
-    'click',
-    () => {
+// ========================================
+// ปุ่มยืนยัน
+// ========================================
 
-        if (!pendingCategory) return;
+confirmOkButton.addEventListener('click', () => {
 
-        const category =
-            pendingCategory;
+    if (!pendingCategory || isUploading) return;
 
-        pendingCategory = null;
+    const category = pendingCategory;
 
-        confirmPopup.classList.remove('show');
+    pendingCategory = null;
 
-        uploadToDrive(category);
+    confirmPopup.classList.remove('show');
 
+    uploadToDrive(category);
+});
+
+
+// ========================================
+// คลิกพื้นหลัง Popup ยืนยัน
+// ========================================
+
+confirmPopup.addEventListener('click', e => {
+
+    if (e.target === confirmPopup) {
+        closeConfirmPopup();
     }
-);
+});
 
 
-// คลิกพื้นหลังเพื่อปิด
-confirmPopup.addEventListener(
-    'click',
-    e => {
+// ========================================
+// Loading Popup Google Drive
+// ========================================
 
-        if (e.target === confirmPopup) {
+function showDriveLoading(category) {
 
-            closeConfirmPopup();
-
-        }
-
+    if (!driveLoadingPopup || !driveLoadingText) {
+        console.error('ไม่พบ HTML ของ Drive Loading Popup');
+        return;
     }
-);
+
+    driveLoadingText.textContent =
+        `กำลังจัดเก็บเอกสารเข้า Google Drive หมวด [${category}]...`;
+
+    driveLoadingPopup.classList.add('show');
+}
+
+
+// ========================================
+// ปิด Loading Popup
+// ========================================
+
+function hideDriveLoading() {
+
+    if (!driveLoadingPopup) return;
+
+    driveLoadingPopup.classList.remove('show');
+}
 
 
 // ========================================
@@ -466,62 +461,47 @@ async function uploadToDrive(category) {
 
     setButtonsDisabled(true);
 
-    showStatus(
-        `กำลังจัดเก็บเอกสารเข้า Google Drive หมวด [${category}]...`,
-        'loading'
-    );
+    // ซ่อนแถบสถานะเก่า
+    resetStatus();
+
+    // แสดง Popup Loading กลางหน้าจอ
+    showDriveLoading(category);
 
     try {
 
-        const res =
-            await fetch(
-                '/api/upload-selected-category',
-                {
+        const res = await fetch(
+            '/api/upload-selected-category',
+            {
+                method: 'POST',
 
-                    method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
 
-                    headers: {
-                        'Content-Type':
-                            'application/json'
-                    },
+                body: JSON.stringify({
+                    uploadToken: currentUploadToken,
+                    category: category
+                })
+            }
+        );
 
-                    body: JSON.stringify({
+        const data = await res.json();
 
-                        uploadToken:
-                            currentUploadToken,
-
-                        category:
-                            category
-
-                    })
-
-                }
-            );
-
-        const data =
-            await res.json();
-
-        if (
-            !res.ok ||
-            !data.success
-        ) {
+        if (!res.ok || !data.success) {
 
             throw new Error(
-
                 data.error ||
                 'อัปโหลดไม่สำเร็จ'
-
             );
-
         }
 
-        // ป้องกันการ Upload ซ้ำ
+        // ป้องกันอัปโหลดซ้ำ
         currentUploadToken = null;
 
-        // ซ่อนสถานะ Loading
-        resetStatus();
+        // ปิด Loading Popup
+        hideDriveLoading();
 
-        // Popup สำเร็จ
+        // แสดง Popup สำเร็จเดิม
         showSuccessPopup(
             data.message ||
             `จัดเก็บเอกสารเข้า Google Drive หมวด [${category}] เรียบร้อยแล้ว`
@@ -531,6 +511,7 @@ async function uploadToDrive(category) {
 
         console.error(err);
 
+        // แสดง Error แบบเดิม
         showStatus(
             `✕ ${err.message}`,
             'error'
@@ -540,15 +521,16 @@ async function uploadToDrive(category) {
 
     } finally {
 
+        // ปิด Loading ทั้งกรณีสำเร็จและ Error
+        hideDriveLoading();
+
         isUploading = false;
-
     }
-
 }
 
 
 // ========================================
-// Loading วิเคราะห์
+// Loading วิเคราะห์ AI
 // ========================================
 
 function startLoading() {
@@ -566,9 +548,12 @@ function startLoading() {
         'กำลังวิเคราะห์...';
 
     resetStatus();
-
 }
 
+
+// ========================================
+// หยุด Loading วิเคราะห์ AI
+// ========================================
 
 function stopLoading() {
 
@@ -578,7 +563,6 @@ function stopLoading() {
 
     submitBtn.textContent =
         '✦ วิเคราะห์เอกสารด้วย AI';
-
 }
 
 
@@ -589,20 +573,16 @@ function stopLoading() {
 function setButtonsDisabled(value) {
 
     document
-        .querySelectorAll(
-            '.btn-confirm-category'
-        )
+        .querySelectorAll('.btn-confirm-category')
         .forEach(button => {
 
             button.disabled = value;
-
         });
-
 }
 
 
 // ========================================
-// Status
+// Reset Status
 // ========================================
 
 function resetStatus() {
@@ -611,35 +591,30 @@ function resetStatus() {
 
     uploadStatus.textContent = '';
 
-    uploadStatus.className =
-        'upload-status';
-
+    uploadStatus.className = 'upload-status';
 }
 
+
+// ========================================
+// แสดง Status / Error
+// ========================================
 
 function showStatus(message, type) {
 
     uploadStatus.textContent = message;
 
-    uploadStatus.className =
-        'upload-status';
+    uploadStatus.className = 'upload-status';
 
     if (type === 'error') {
 
-        uploadStatus.classList.add(
-            'error'
-        );
+        uploadStatus.classList.add('error');
 
     } else {
 
-        uploadStatus.classList.add(
-            'loading'
-        );
-
+        uploadStatus.classList.add('loading');
     }
 
     uploadStatus.style.display = 'block';
-
 }
 
 
@@ -649,20 +624,25 @@ function showStatus(message, type) {
 
 function showSuccessPopup(message) {
 
-    successPopupText.textContent =
-        message;
+    successPopupText.textContent = message;
 
     successPopup.classList.add('show');
-
 }
 
+
+// ========================================
+// ปิด Popup สำเร็จ
+// ========================================
 
 function closeSuccessPopup() {
 
     successPopup.classList.remove('show');
-
 }
 
+
+// ========================================
+// ปุ่มตกลง Popup สำเร็จ
+// ========================================
 
 successPopupButton.addEventListener(
     'click',
@@ -670,48 +650,37 @@ successPopupButton.addEventListener(
 );
 
 
-successPopup.addEventListener(
-    'click',
-    e => {
+// ========================================
+// คลิกพื้นหลัง Popup สำเร็จ
+// ========================================
 
-        if (e.target === successPopup) {
+successPopup.addEventListener('click', e => {
 
-            closeSuccessPopup();
-
-        }
-
+    if (e.target === successPopup) {
+        closeSuccessPopup();
     }
-);
+});
 
 
 // ========================================
 // ESC ปิด Popup
 // ========================================
 
-document.addEventListener(
-    'keydown',
-    e => {
+document.addEventListener('keydown', e => {
 
-        if (e.key !== 'Escape') return;
+    if (e.key !== 'Escape') return;
 
-        if (
-            confirmPopup.classList.contains('show')
-        ) {
-
-            closeConfirmPopup();
-
-        }
-
-        if (
-            successPopup.classList.contains('show')
-        ) {
-
-            closeSuccessPopup();
-
-        }
-
+    if (confirmPopup.classList.contains('show')) {
+        closeConfirmPopup();
     }
-);
+
+    if (successPopup.classList.contains('show')) {
+        closeSuccessPopup();
+    }
+
+    // ไม่ปิด Loading Popup ด้วย ESC
+    // เพราะระบบกำลังอัปโหลดไฟล์อยู่
+});
 
 
 // ========================================
@@ -720,12 +689,9 @@ document.addEventListener(
 
 function escapeHtml(text) {
 
-    const div =
-        document.createElement('div');
+    const div = document.createElement('div');
 
-    div.textContent =
-        text || '';
+    div.textContent = text || '';
 
     return div.innerHTML;
-
 }

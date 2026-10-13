@@ -1532,4 +1532,62 @@ button {
         margin-top: 2px;
     }
 
+    /* =========================
+   DRIVE LOADING POPUP
+========================= */
+
+.drive-loading-popup {
+    cursor: wait;
+}
+
+.loading-popup-box {
+    max-width: 390px;
+    padding: 34px 28px 30px;
+}
+
+.drive-loading-spinner {
+    width: 58px;
+    height: 58px;
+
+    margin: 0 auto 20px;
+
+    border: 5px solid #f3d6da;
+    border-top-color: var(--primary);
+    border-radius: 50%;
+
+    animation: driveSpin .8s linear infinite;
+}
+
+@keyframes driveSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.loading-popup-box h3 {
+    margin-bottom: 8px;
+
+    color: var(--navy);
+
+    font-size: 21px;
+    font-weight: 800;
+}
+
+.loading-popup-box p {
+    color: var(--muted);
+
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.loading-popup-note {
+    display: block;
+
+    margin-top: 14px;
+
+    color: #98a2b3;
+
+    font-size: 12px;
+}
+
 }

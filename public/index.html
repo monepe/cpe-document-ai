@@ -120,8 +120,8 @@
                     <span>หรือคลิกเพื่อเลือกไฟล์</span>
 
                     <small>
-                        รองรับ PDF, JPG, JPEG, PNG, HEIC และ HEIF
-                        ขนาดไม่เกิน 50 MB
+                         รองรับ PDF, JPG, JPEG, PNG, HEIC, HEIF และ DOCX
+                         ขนาดไม่เกิน 50 MB
                     </small>
 
                     <div id="fileName" class="file-name-display"></div>
@@ -129,11 +129,11 @@
                 </div>
 
                 <input
-                    type="file"
-                    id="imageInput"
-                    name="image"
-                    accept="image/*,application/pdf,.heic,.heif"
-                    hidden
+                     type="file"
+                     id="imageInput"
+                     name="image"
+                     accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                     hidden
                 >
 
                 <button
@@ -237,6 +237,26 @@
 
 </div>
 
+<!-- POPUP LOADING GOOGLE DRIVE -->
+<div id="driveLoadingPopup" class="custom-popup drive-loading-popup">
+
+    <div class="custom-popup-box loading-popup-box">
+
+        <div class="drive-loading-spinner"></div>
+
+        <h3>กำลังจัดเก็บเอกสาร</h3>
+
+        <p id="driveLoadingText">
+            กำลังอัปโหลดไฟล์เข้า Google Drive...
+        </p>
+
+        <small class="loading-popup-note">
+            กรุณารอสักครู่ และอย่าปิดหน้านี้
+        </small>
+
+    </div>
+
+</div>
 
 <!-- POPUP UPLOAD SUCCESS -->
 <div id="successPopup" class="custom-popup">
