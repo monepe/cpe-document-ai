@@ -1,3 +1,4 @@
+
 require('dotenv').config();
 
 const express = require('express');
@@ -31,15 +32,20 @@ const UPLOAD_DIR = path.join(__dirname, 'uploads');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const GOOGLE_CALLBACK_URL =
-    env.GOOGLE_CALLBACK_URL || 'http://localhost:3000/auth/google/callback';
+    env.GOOGLE_CALLBACK_URL ||
+    'http://localhost:3000/auth/google/callback';
+
 const GOOGLE_SCOPES = [
     'profile',
     'email',
     'https://www.googleapis.com/auth/drive.file'
 ];
 
-const ENABLE_USER_WHITELIST = env.ENABLE_USER_WHITELIST === 'true';
-const OCR_POOL_SIZE = Math.max(1, Number(env.OCR_POOL_SIZE) || 2);
+const ENABLE_USER_WHITELIST =
+    env.ENABLE_USER_WHITELIST === 'true';
+
+const OCR_POOL_SIZE =
+    Math.max(1, Number(env.OCR_POOL_SIZE) || 2);
 
 const AI_MODEL = 'openai/gpt-oss-20b';
 const APP_DRIVE_FOLDER = 'CPE Document AI';
@@ -49,8 +55,8 @@ const SESSION_MAX_AGE = 30 * 60 * 1000;
 const PENDING_TTL = 30 * 60 * 1000;
 const PENDING_SWEEP_INTERVAL = 5 * 60 * 1000;
 
-// เวลาไทย (UTC+7) สำหรับบันทึกลงฐานข้อมูล
-const NOW_TH = 'DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)';
+const NOW_TH =
+    'DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)';
 
 const CATEGORIES = [
     'ภาระงานบริการวิชาการ',
@@ -60,19 +66,27 @@ const CATEGORIES = [
     'อื่นๆ'
 ];
 
-const REQUIRED_TABLES = ['users', 'logs', 'files'];
+const REQUIRED_TABLES = [
+    'users',
+    'logs',
+    'files'
+];
 
 /* =====================================================
    SERVICES
 ===================================================== */
 
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+if (!fs.existsSync(UPLOAD_DIR)) {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
 
 const app = express();
 
 const upload = multer({
     dest: UPLOAD_DIR,
-    limits: { fileSize: MAX_FILE_SIZE }
+    limits: {
+        fileSize: MAX_FILE_SIZE
+    }
 });
 
 const db = mysql.createPool({
@@ -88,9 +102,11 @@ const db = mysql.createPool({
     timezone: '+07:00'
 });
 
-const groq = new Groq({ apiKey: env.GROQ_API_KEY });
+const groq = new Groq({
+    apiKey: env.GROQ_API_KEY
+});
 
-// ไฟล์ที่วิเคราะห์แล้วและรอผู้ใช้เลือกหมวด
+// เก็บไฟล์ที่วิเคราะห์แล้วและรอเลือกหมวด
 const pendingUploads = new Map();
 
 /* =====================================================
@@ -101,8 +117,12 @@ function fixThaiFilename(filename) {
     if (!filename) return filename;
 
     try {
-        const fixed = Buffer.from(filename, 'latin1').toString('utf8');
-        return fixed.includes('\uFFFD') ? filename : fixed;
+        const fixed =
+            Buffer.from(filename, 'latin1').toString('utf8');
+
+        return fixed.includes('\uFFFD')
+            ? filename
+            : fixed;
     } catch {
         return filename;
     }
@@ -110,9 +130,14 @@ function fixThaiFilename(filename) {
 
 function cleanupFile(file) {
     try {
-        if (file && fs.existsSync(file)) fs.unlinkSync(file);
+        if (file && fs.existsSync(file)) {
+            fs.unlinkSync(file);
+        }
     } catch (error) {
-        console.error('ลบไฟล์ไม่สำเร็จ:', error.message);
+        console.error(
+            'ลบไฟล์ไม่สำเร็จ:',
+            error.message
+        );
     }
 }
 
@@ -125,8 +150,129 @@ function getUserEmail(req) {
 
 function sendError(res, status, error, detail) {
     const body = { error };
-    if (detail !== undefined) body.detail = detail;
+
+    if (detail !== undefined) {
+        body.detail = detail;
+    }
+
     return res.status(status).json(body);
+}
+
+/* =====================================================
+   AUTOMATIC FILE RENAMING
+===================================================== */
+
+// ทำให้ข้อความเหมาะสำหรับใช้เป็นชื่อไฟล์
+function safeFilenamePart(value, maxLength = 75) {
+    return String(value || '')
+        .normalize('NFC')
+        .replace(/[\\/:*?"<>|\x00-\x1F\x7F]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/^[.\s_]+|[.\s_]+$/g, '')
+        .trim()
+        .slice(0, maxLength)
+        .trim()
+        .replace(/\s+/g, '-');
+}
+
+// ดึงเลขคำสั่งจาก OCR
+function extractDocumentNumber(ocrText) {
+    const text =
+        String(ocrText || '').slice(0, 12000);
+
+    const match = text.match(
+        /(?:คำสั่ง(?:มหาวิทยาลัย)?(?:ที่)?|เลขที่(?:คำสั่ง)?|ที่)\s*[:：.]?\s*(\d{1,6}\s*[\/-]\s*\d{2,4})/u
+    );
+
+    return match
+        ? match[1]
+            .replace(/\s+/g, '')
+            .replace('/', '-')
+        : null;
+}
+
+// ดึงชื่อเรื่องจาก OCR
+function extractDocumentSubject(
+    ocrText,
+    originalFileName
+) {
+    const lines = String(ocrText || '')
+        .split(/\r?\n/)
+        .map(line =>
+            line.replace(/\s+/g, ' ').trim()
+        )
+        .filter(Boolean);
+
+    const subjectLine = lines.find(
+        line => /^เรื่อง\s*[:：]?\s*\S/u.test(line)
+    );
+
+    if (subjectLine) {
+        const subject = subjectLine.replace(
+            /^เรื่อง\s*[:：]?\s*/u,
+            ''
+        );
+
+        const cleaned =
+            safeFilenamePart(subject, 85);
+
+        if (cleaned) {
+            return cleaned;
+        }
+    }
+
+    // หากหาเรื่องไม่พบ ใช้ชื่อไฟล์เดิมแทน
+    const baseName =
+        path.parse(originalFileName || '').name;
+
+    return (
+        safeFilenamePart(baseName, 85) ||
+        'เอกสาร'
+    );
+}
+
+// สร้างชื่อไฟล์สำหรับ Google Drive
+function buildDriveFilename(
+    category,
+    ocrText,
+    originalFileName
+) {
+    const extension =
+        path.extname(originalFileName || '')
+            .toLowerCase();
+
+    const safeExtension =
+        /^\.[a-z0-9]{1,10}$/.test(extension)
+            ? extension
+            : '';
+
+    const categoryPart =
+        safeFilenamePart(category, 65) ||
+        'อื่นๆ';
+
+    const numberPart = safeFilenamePart(
+        extractDocumentNumber(ocrText) ||
+        'ไม่มีเลขที่',
+        25
+    );
+
+    const subjectPart =
+        extractDocumentSubject(
+            ocrText,
+            originalFileName
+        );
+
+    // รหัสสุ่มลดโอกาสชื่อไฟล์ซ้ำ
+    const uniquePart =
+        crypto.randomBytes(4).toString('hex');
+
+    return (
+        `${categoryPart}_` +
+        `${numberPart}_` +
+        `${subjectPart}_` +
+        `${uniquePart}` +
+        `${safeExtension}`
+    );
 }
 
 /* =====================================================
@@ -137,30 +283,49 @@ const idleOcrWorkers = [];
 const ocrWaiters = [];
 
 async function initOcrPool() {
-    console.log(`⏳ เตรียม OCR workers ${OCR_POOL_SIZE} ตัว...`);
+    console.log(
+        `⏳ เตรียม OCR workers ${OCR_POOL_SIZE} ตัว...`
+    );
 
-    for (let i = 0; i < OCR_POOL_SIZE; i++)
-        idleOcrWorkers.push(await createWorker(['tha', 'eng']));
+    for (let i = 0; i < OCR_POOL_SIZE; i++) {
+        idleOcrWorkers.push(
+            await createWorker(['tha', 'eng'])
+        );
+    }
 
     console.log('✅ OCR workers พร้อมใช้งาน');
 }
 
 function acquireOcrWorker() {
-    if (idleOcrWorkers.length) return Promise.resolve(idleOcrWorkers.pop());
-    return new Promise(resolve => ocrWaiters.push(resolve));
+    if (idleOcrWorkers.length) {
+        return Promise.resolve(
+            idleOcrWorkers.pop()
+        );
+    }
+
+    return new Promise(resolve =>
+        ocrWaiters.push(resolve)
+    );
 }
 
 function releaseOcrWorker(worker) {
     const waiter = ocrWaiters.shift();
-    if (waiter) waiter(worker);
-    else idleOcrWorkers.push(worker);
+
+    if (waiter) {
+        waiter(worker);
+    } else {
+        idleOcrWorkers.push(worker);
+    }
 }
 
 async function recognizeText(source) {
     const worker = await acquireOcrWorker();
 
     try {
-        const { data: { text } } = await worker.recognize(source);
+        const {
+            data: { text }
+        } = await worker.recognize(source);
+
         return text;
     } finally {
         releaseOcrWorker(worker);
@@ -168,9 +333,10 @@ async function recognizeText(source) {
 }
 
 /* =====================================================
-   FILE CONVERSION (PDF / HEIC -> JPEG)
+   FILE CONVERSION
 ===================================================== */
 
+// PDF: อ่านหน้าแรกตาม server.js เดิม
 async function convertPdfFirstPage(filePath) {
     const outputPrefix = path.join(
         path.dirname(filePath),
@@ -189,10 +355,14 @@ async function convertPdfFirstPage(filePath) {
         maxBuffer: 10 * 1024 * 1024
     });
 
-    const outputFile = outputPrefix + '.jpg';
+    const outputFile =
+        outputPrefix + '.jpg';
 
-    if (!fs.existsSync(outputFile))
-        throw new Error('ไม่สามารถแปลง PDF เป็นรูปภาพได้');
+    if (!fs.existsSync(outputFile)) {
+        throw new Error(
+            'ไม่สามารถแปลง PDF เป็นรูปภาพได้'
+        );
+    }
 
     return outputFile;
 }
@@ -204,27 +374,42 @@ async function convertHeicToJpeg(filePath) {
         quality: 0.9
     });
 
-    const outputFile = filePath + '_converted.jpg';
+    const outputFile =
+        filePath + '_converted.jpg';
+
     fs.writeFileSync(outputFile, buffer);
 
     return outputFile;
 }
 
-/**
- * คืนค่าเป็นไฟล์ที่ OCR อ่านได้ และไฟล์ชั่วคราว (ถ้ามี) ที่ต้องลบทีหลัง
- */
 async function prepareOcrSource(file, ext) {
-    if (ext === 'pdf' || file.mimetype === 'application/pdf') {
-        const tempFile = await convertPdfFirstPage(file.path);
-        return { source: tempFile, tempFile };
+    if (
+        ext === 'pdf' ||
+        file.mimetype === 'application/pdf'
+    ) {
+        const tempFile =
+            await convertPdfFirstPage(file.path);
+
+        return {
+            source: tempFile,
+            tempFile
+        };
     }
 
     if (ext === 'heic' || ext === 'heif') {
-        const tempFile = await convertHeicToJpeg(file.path);
-        return { source: tempFile, tempFile };
+        const tempFile =
+            await convertHeicToJpeg(file.path);
+
+        return {
+            source: tempFile,
+            tempFile
+        };
     }
 
-    return { source: file.path, tempFile: null };
+    return {
+        source: file.path,
+        tempFile: null
+    };
 }
 
 /* =====================================================
@@ -299,27 +484,40 @@ function buildPrompt(text) {
 `;
 }
 
-/**
- * แปลงข้อความจาก AI เป็นคะแนน 5 หมวดที่รวมได้ 100% เรียงจากมากไปน้อย
- * (ไม่ปัดทศนิยมที่ Backend ให้หน้าเว็บปัดเอง)
- */
 function parseAiJson(text) {
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
 
-    if (start === -1 || end === -1)
-        throw new Error('AI ไม่ได้ส่ง JSON กลับมา');
+    if (start === -1 || end === -1) {
+        throw new Error(
+            'AI ไม่ได้ส่ง JSON กลับมา'
+        );
+    }
 
-    const parsed = JSON.parse(text.slice(start, end + 1));
+    const parsed = JSON.parse(
+        text.slice(start, end + 1)
+    );
 
     const scores = new Map();
 
     if (Array.isArray(parsed.categories)) {
         for (const item of parsed.categories) {
-            if (!item || !CATEGORIES.includes(item.name)) continue;
+            if (
+                !item ||
+                !CATEGORIES.includes(item.name)
+            ) {
+                continue;
+            }
 
-            const value = Number(item.percentage);
-            scores.set(item.name, Number.isFinite(value) ? Math.max(0, value) : 0);
+            const value =
+                Number(item.percentage);
+
+            scores.set(
+                item.name,
+                Number.isFinite(value)
+                    ? Math.max(0, value)
+                    : 0
+            );
         }
     }
 
@@ -328,39 +526,64 @@ function parseAiJson(text) {
         percentage: scores.get(name) ?? 0
     }));
 
-    const total = raw.reduce((sum, item) => sum + item.percentage, 0);
+    const total = raw.reduce(
+        (sum, item) =>
+            sum + item.percentage,
+        0
+    );
 
-    // AI ไม่ส่งคะแนนที่ใช้ได้ → ให้ "อื่นๆ" 100% แทนการหารเท่ากันทุกหมวด
     const categories = raw.map(item => ({
         ...item,
+
         percentage: total <= 0
-            ? (item.name === 'อื่นๆ' ? 100 : 0)
-            : (item.percentage / total) * 100
+            ? (
+                item.name === 'อื่นๆ'
+                    ? 100
+                    : 0
+            )
+            : (
+                item.percentage / total
+            ) * 100
     }));
 
-    categories.sort((a, b) => b.percentage - a.percentage);
+    categories.sort(
+        (a, b) =>
+            b.percentage - a.percentage
+    );
 
     return {
-        reason: typeof parsed.reason === 'string' ? parsed.reason.trim() : '',
+        reason:
+            typeof parsed.reason === 'string'
+                ? parsed.reason.trim()
+                : '',
         categories
     };
 }
 
 async function classifyText(text) {
-    const completion = await groq.chat.completions.create({
-        messages: [{ role: 'user', content: buildPrompt(text) }],
-        model: AI_MODEL,
-        temperature: 0
-    });
+    const completion =
+        await groq.chat.completions.create({
+            messages: [
+                {
+                    role: 'user',
+                    content: buildPrompt(text)
+                }
+            ],
+            model: AI_MODEL,
+            temperature: 0
+        });
 
-    return parseAiJson(completion.choices?.[0]?.message?.content || '');
+    return parseAiJson(
+        completion.choices?.[0]?.message?.content || ''
+    );
 }
 
 /* =====================================================
    GOOGLE DRIVE
 ===================================================== */
 
-const FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
+const FOLDER_MIME_TYPE =
+    'application/vnd.google-apps.folder';
 
 function createDriveClient(user) {
     const auth = new google.auth.OAuth2(
@@ -371,17 +594,27 @@ function createDriveClient(user) {
 
     auth.setCredentials({
         access_token: user.accessToken,
-        refresh_token: user.refreshToken || undefined
+        refresh_token:
+            user.refreshToken || undefined
     });
 
-    return google.drive({ version: 'v3', auth });
+    return google.drive({
+        version: 'v3',
+        auth
+    });
 }
 
 function escapeDriveQuery(value) {
-    return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return String(value)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'");
 }
 
-async function findDriveFolder(drive, name, parentId) {
+async function findDriveFolder(
+    drive,
+    name,
+    parentId
+) {
     const q =
         `name='${escapeDriveQuery(name)}' and ` +
         `mimeType='${FOLDER_MIME_TYPE}' and trashed=false and ` +
@@ -397,12 +630,18 @@ async function findDriveFolder(drive, name, parentId) {
     return response.data.files?.[0] || null;
 }
 
-async function createDriveFolder(drive, name, parentId) {
+async function createDriveFolder(
+    drive,
+    name,
+    parentId
+) {
     const response = await drive.files.create({
         requestBody: {
             name,
             mimeType: FOLDER_MIME_TYPE,
-            parents: [parentId || 'root']
+            parents: [
+                parentId || 'root'
+            ]
         },
         fields: 'id,name,parents'
     });
@@ -410,23 +649,62 @@ async function createDriveFolder(drive, name, parentId) {
     return response.data;
 }
 
-async function getOrCreateDriveFolder(drive, name, parentId) {
+async function getOrCreateDriveFolder(
+    drive,
+    name,
+    parentId
+) {
     const folder =
-        (await findDriveFolder(drive, name, parentId)) ||
-        (await createDriveFolder(drive, name, parentId));
+        (await findDriveFolder(
+            drive,
+            name,
+            parentId
+        )) ||
+        (await createDriveFolder(
+            drive,
+            name,
+            parentId
+        ));
 
     return folder.id;
 }
 
-async function getCategoryFolderId(drive, category) {
-    const mainFolderId = await getOrCreateDriveFolder(drive, APP_DRIVE_FOLDER, null);
-    return getOrCreateDriveFolder(drive, category, mainFolderId);
+async function getCategoryFolderId(
+    drive,
+    category
+) {
+    const mainFolderId =
+        await getOrCreateDriveFolder(
+            drive,
+            APP_DRIVE_FOLDER,
+            null
+        );
+
+    return getOrCreateDriveFolder(
+        drive,
+        category,
+        mainFolderId
+    );
 }
 
-async function uploadToDrive(drive, { folderId, name, mimeType, filePath }) {
+async function uploadToDrive(
+    drive,
+    {
+        folderId,
+        name,
+        mimeType,
+        filePath
+    }
+) {
     const response = await drive.files.create({
-        requestBody: { name, parents: [folderId] },
-        media: { mimeType, body: fs.createReadStream(filePath) },
+        requestBody: {
+            name,
+            parents: [folderId]
+        },
+        media: {
+            mimeType,
+            body: fs.createReadStream(filePath)
+        },
         fields: 'id,name'
     });
 
@@ -451,16 +729,27 @@ async function findUserByEmail(email) {
 
 async function createUser(email) {
     const [result] = await db.execute(
-        `INSERT INTO users (email, created_at)
+        `INSERT INTO users
+         (email, created_at)
          VALUES (?, ${NOW_TH})`,
         [email]
     );
 
-    return { id: result.insertId, email };
+    return {
+        id: result.insertId,
+        email
+    };
 }
 
-async function saveUploadRecord({ userId, fileName, category, driveFileId, confidence }) {
-    const connection = await db.getConnection();
+async function saveUploadRecord({
+    userId,
+    fileName,
+    category,
+    driveFileId,
+    confidence
+}) {
+    const connection =
+        await db.getConnection();
 
     try {
         await connection.beginTransaction();
@@ -469,33 +758,56 @@ async function saveUploadRecord({ userId, fileName, category, driveFileId, confi
             `INSERT INTO files
              (user_id, original_name, category, drive_file_id, created_at)
              VALUES (?, ?, ?, ?, ${NOW_TH})`,
-            [userId, fileName, category, driveFileId]
+            [
+                userId,
+                fileName,
+                category,
+                driveFileId
+            ]
         );
 
         await connection.execute(
             `INSERT INTO logs
              (user_id, category, confidence, created_at)
              VALUES (?, ?, ?, ${NOW_TH})`,
-            [userId, category, confidence]
+            [
+                userId,
+                category,
+                confidence
+            ]
         );
 
         await connection.commit();
+
     } catch (error) {
         await connection.rollback();
         throw error;
+
     } finally {
         connection.release();
     }
 }
 
 async function assertDatabaseReady() {
-    const connection = await db.getConnection();
+    const connection =
+        await db.getConnection();
+
     connection.release();
-    console.log('✅ เชื่อมต่อ MySQL สำเร็จ');
+
+    console.log(
+        '✅ เชื่อมต่อ MySQL สำเร็จ'
+    );
 
     for (const table of REQUIRED_TABLES) {
-        const [rows] = await db.execute(`SHOW TABLES LIKE '${table}'`);
-        if (!rows.length) throw new Error(`ไม่พบตาราง ${table}`);
+        const [rows] = await db.execute(
+            `SHOW TABLES LIKE '${table}'`
+        );
+
+        if (!rows.length) {
+            throw new Error(
+                `ไม่พบตาราง ${table}`
+            );
+        }
     }
 }
 
@@ -503,15 +815,26 @@ async function assertDatabaseReady() {
    MIDDLEWARE
 ===================================================== */
 
-if (IS_PRODUCTION) app.set('trust proxy', 1);
+if (IS_PRODUCTION) {
+    app.set('trust proxy', 1);
+}
 
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
+app.use(
+    express.urlencoded({
+        extended: true
+    })
+);
 
 app.use(session({
-    secret: env.SESSION_SECRET || 'change-this-session-secret',
+    secret:
+        env.SESSION_SECRET ||
+        'change-this-session-secret',
+
     resave: false,
     saveUninitialized: false,
+
     cookie: {
         maxAge: SESSION_MAX_AGE,
         httpOnly: true,
@@ -525,7 +848,10 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 function checkAuth(req, res, next) {
-    if (req.isAuthenticated()) return next();
+    if (req.isAuthenticated()) {
+        return next();
+    }
+
     res.redirect('/login.html');
 }
 
@@ -533,96 +859,148 @@ function checkAuth(req, res, next) {
    GOOGLE LOGIN
 ===================================================== */
 
-passport.serializeUser((user, done) => done(null, user));
-passport.deserializeUser((user, done) => done(null, user));
+passport.serializeUser(
+    (user, done) =>
+        done(null, user)
+);
 
-/**
- * ENABLE_USER_WHITELIST
- *   true  = เฉพาะ email ที่มีอยู่ใน users เท่านั้น
- *   false = ทุก Google Account เข้าได้ และเพิ่ม email ลง users อัตโนมัติ
- */
-async function verifyGoogleUser(accessToken, refreshToken, profile, done) {
+passport.deserializeUser(
+    (user, done) =>
+        done(null, user)
+);
+
+async function verifyGoogleUser(
+    accessToken,
+    refreshToken,
+    profile,
+    done
+) {
     try {
-        const email = profile.emails?.[0]?.value?.trim().toLowerCase();
+        const email =
+            profile.emails?.[0]?.value
+                ?.trim()
+                .toLowerCase();
 
-        if (!email)
-            return done(null, false, { message: 'ไม่พบ Gmail จากบัญชี Google นี้' });
-
-        let dbUser = await findUserByEmail(email);
-
-        if (!dbUser) {
-            if (ENABLE_USER_WHITELIST)
-                return done(null, false, {
-                    message: 'อีเมลของคุณไม่มีสิทธิ์เข้าใช้งานระบบนี้!'
-                });
-
-            dbUser = await createUser(email);
-            console.log(`👤 เพิ่มผู้ใช้ใหม่อัตโนมัติ: ${email}`);
+        if (!email) {
+            return done(null, false, {
+                message:
+                    'ไม่พบ Gmail จากบัญชี Google นี้'
+            });
         }
 
-        // Token สำหรับ Google Drive และข้อมูลผู้ใช้จาก Database
+        let dbUser =
+            await findUserByEmail(email);
+
+        if (!dbUser) {
+            if (ENABLE_USER_WHITELIST) {
+                return done(null, false, {
+                    message:
+                        'อีเมลของคุณไม่มีสิทธิ์เข้าใช้งานระบบนี้!'
+                });
+            }
+
+            dbUser =
+                await createUser(email);
+
+            console.log(
+                `👤 เพิ่มผู้ใช้ใหม่อัตโนมัติ: ${email}`
+            );
+        }
+
         profile.accessToken = accessToken;
         profile.refreshToken = refreshToken;
         profile.dbUser = dbUser;
 
         return done(null, profile);
+
     } catch (error) {
-        console.error('❌ Google Login Error:', error);
+        console.error(
+            '❌ Google Login Error:',
+            error
+        );
+
         return done(error);
     }
 }
 
-passport.use(new GoogleStrategy({
-    clientID: env.GOOGLE_CLIENT_ID,
-    clientSecret: env.GOOGLE_CLIENT_SECRET,
-    callbackURL: GOOGLE_CALLBACK_URL
-}, verifyGoogleUser));
+passport.use(
+    new GoogleStrategy({
+        clientID: env.GOOGLE_CLIENT_ID,
+        clientSecret: env.GOOGLE_CLIENT_SECRET,
+        callbackURL: GOOGLE_CALLBACK_URL
+    }, verifyGoogleUser)
+);
 
 /* =====================================================
    AUTH & PAGE ROUTES
 ===================================================== */
 
-app.get('/auth/google', passport.authenticate('google', {
-    scope: GOOGLE_SCOPES,
-    accessType: 'offline',
-    prompt: 'consent'
-}));
+app.get(
+    '/auth/google',
+    passport.authenticate('google', {
+        scope: GOOGLE_SCOPES,
+        accessType: 'offline',
+        prompt: 'consent'
+    })
+);
 
-app.get('/auth/google/callback',
+app.get(
+    '/auth/google/callback',
+
     passport.authenticate('google', {
         failureRedirect: '/login.html',
         failureFlash: true
     }),
-    (req, res) => res.redirect('/index.html')
+
+    (req, res) =>
+        res.redirect('/index.html')
 );
 
-app.get('/api/auth-error', (req, res) =>
-    res.json({ error: req.flash('error')[0] || null })
-);
+app.get('/api/auth-error', (req, res) => {
+    res.json({
+        error:
+            req.flash('error')[0] || null
+    });
+});
 
 app.get('/api/me', checkAuth, (req, res) => {
     res.json({
         success: true,
+
         user: {
             id: req.user.dbUser?.id,
             email: req.user.dbUser?.email,
-            displayName: req.user.displayName || req.user.dbUser?.email,
-            photo: req.user.photos?.[0]?.value || null
+
+            displayName:
+                req.user.displayName ||
+                req.user.dbUser?.email,
+
+            photo:
+                req.user.photos?.[0]?.value ||
+                null
         }
     });
 });
 
 app.get('/api/logout', (req, res, next) => {
     req.logout(error => {
-        if (error) return next(error);
-        req.session.destroy(() => res.redirect('/login.html'));
+        if (error) {
+            return next(error);
+        }
+
+        req.session.destroy(() =>
+            res.redirect('/login.html')
+        );
     });
 });
 
 app.get('/index.html', checkAuth);
-app.get('/', checkAuth, (req, res) =>
-    res.sendFile(path.join(PUBLIC_DIR, 'index.html'))
-);
+
+app.get('/', checkAuth, (req, res) => {
+    res.sendFile(
+        path.join(PUBLIC_DIR, 'index.html')
+    );
+});
 
 app.use(express.static(PUBLIC_DIR));
 
@@ -630,136 +1008,339 @@ app.use(express.static(PUBLIC_DIR));
    API: CLASSIFY
 ===================================================== */
 
-app.post('/api/classify', checkAuth, upload.single('image'), async (req, res) => {
-    if (!req.file)
-        return sendError(res, 400, 'กรุณาอัปโหลดไฟล์');
+app.post(
+    '/api/classify',
+    checkAuth,
+    upload.single('image'),
+    async (req, res) => {
 
-    req.file.originalname = fixThaiFilename(req.file.originalname);
-
-    const filePath = req.file.path;
-    const ext = req.file.originalname.split('.').pop().toLowerCase();
-
-    let tempFile = null;
-
-    try {
-        const ocr = await prepareOcrSource(req.file, ext);
-        tempFile = ocr.tempFile;
-
-        const text = await recognizeText(ocr.source);
-
-        cleanupFile(tempFile);
-        tempFile = null;
-
-        const trimmedText = text.trim();
-
-        if (!trimmedText) {
-            cleanupFile(filePath);
-            return sendError(res, 400, 'ไม่พบข้อความในเอกสาร');
+        if (!req.file) {
+            return sendError(
+                res,
+                400,
+                'กรุณาอัปโหลดไฟล์'
+            );
         }
 
-        const { reason, categories } = await classifyText(trimmedText);
+        req.file.originalname =
+            fixThaiFilename(
+                req.file.originalname
+            );
 
-        const uploadToken = crypto.randomUUID();
+        const filePath = req.file.path;
 
-        pendingUploads.set(uploadToken, {
-            filePath,
-            originalFileName: req.file.originalname,
-            originalMimeType: req.file.mimetype,
-            userEmail: getUserEmail(req),
-            userId: req.user.dbUser?.id,
-            categories,
-            reason,
-            createdAt: Date.now()
-        });
+        const ext =
+            req.file.originalname
+                .split('.')
+                .pop()
+                .toLowerCase();
 
-        res.json({
-            success: true,
-            uploadToken,
-            reason,
-            categories,
-            recommendedCategory: categories[0]?.name || null
-        });
-    } catch (error) {
-        console.error('❌ Classification Error:', error);
+        let tempFile = null;
 
-        cleanupFile(filePath);
-        cleanupFile(tempFile);
+        try {
+            // เตรียมไฟล์สำหรับ OCR
+            const ocr =
+                await prepareOcrSource(
+                    req.file,
+                    ext
+                );
 
-        sendError(res, 500, 'ระบบวิเคราะห์เอกสารผิดพลาด', error.message);
+            tempFile = ocr.tempFile;
+
+            // อ่านข้อความ
+            const text =
+                await recognizeText(
+                    ocr.source
+                );
+
+            cleanupFile(tempFile);
+            tempFile = null;
+
+            const trimmedText =
+                text.trim();
+
+            if (!trimmedText) {
+                cleanupFile(filePath);
+
+                return sendError(
+                    res,
+                    400,
+                    'ไม่พบข้อความในเอกสาร'
+                );
+            }
+
+            // ให้ AI จำแนกหมวดหมู่
+            const {
+                reason,
+                categories
+            } = await classifyText(
+                trimmedText
+            );
+
+            const uploadToken =
+                crypto.randomUUID();
+
+            // เก็บข้อมูลรอผู้ใช้ยืนยันหมวด
+            pendingUploads.set(
+                uploadToken,
+                {
+                    filePath,
+
+                    originalFileName:
+                        req.file.originalname,
+
+                    originalMimeType:
+                        req.file.mimetype,
+
+                    userEmail:
+                        getUserEmail(req),
+
+                    userId:
+                        req.user.dbUser?.id,
+
+                    categories,
+                    reason,
+
+                    // เพิ่ม OCR Text สำหรับตั้งชื่อไฟล์
+                    ocrText:
+                        trimmedText.slice(0, 12000),
+
+                    createdAt:
+                        Date.now()
+                }
+            );
+
+            res.json({
+                success: true,
+                uploadToken,
+                reason,
+                categories,
+
+                recommendedCategory:
+                    categories[0]?.name ||
+                    null
+            });
+
+        } catch (error) {
+            console.error(
+                '❌ Classification Error:',
+                error
+            );
+
+            cleanupFile(filePath);
+            cleanupFile(tempFile);
+
+            sendError(
+                res,
+                500,
+                'ระบบวิเคราะห์เอกสารผิดพลาด',
+                error.message
+            );
+        }
     }
-});
+);
 
 /* =====================================================
    API: UPLOAD SELECTED CATEGORY
 ===================================================== */
 
-app.post('/api/upload-selected-category', checkAuth, async (req, res) => {
-    const { uploadToken, category } = req.body;
+app.post(
+    '/api/upload-selected-category',
+    checkAuth,
+    async (req, res) => {
 
-    if (!uploadToken || !category)
-        return sendError(res, 400, 'ข้อมูลการอัปโหลดไม่ครบ');
+        const {
+            uploadToken,
+            category
+        } = req.body;
 
-    if (!CATEGORIES.includes(category))
-        return sendError(res, 400, 'หมวดหมู่ไม่ถูกต้อง');
+        if (!uploadToken || !category) {
+            return sendError(
+                res,
+                400,
+                'ข้อมูลการอัปโหลดไม่ครบ'
+            );
+        }
 
-    const pending = pendingUploads.get(uploadToken);
+        if (!CATEGORIES.includes(category)) {
+            return sendError(
+                res,
+                400,
+                'หมวดหมู่ไม่ถูกต้อง'
+            );
+        }
 
-    if (!pending)
-        return sendError(
-            res, 404,
-            'ไม่พบไฟล์ที่รออัปโหลด กรุณาวิเคราะห์เอกสารใหม่อีกครั้ง'
-        );
+        const pending =
+            pendingUploads.get(uploadToken);
 
-    if (pending.userEmail !== getUserEmail(req))
-        return sendError(res, 403, 'ไม่มีสิทธิ์อัปโหลดไฟล์นี้');
+        if (!pending) {
+            return sendError(
+                res,
+                404,
+                'ไม่พบไฟล์ที่รออัปโหลด กรุณาวิเคราะห์เอกสารใหม่อีกครั้ง'
+            );
+        }
 
-    if (!fs.existsSync(pending.filePath)) {
-        pendingUploads.delete(uploadToken);
-        return sendError(res, 404, 'ไฟล์ชั่วคราวหาย กรุณาวิเคราะห์ใหม่');
+        if (
+            pending.userEmail !==
+            getUserEmail(req)
+        ) {
+            return sendError(
+                res,
+                403,
+                'ไม่มีสิทธิ์อัปโหลดไฟล์นี้'
+            );
+        }
+
+        if (!fs.existsSync(pending.filePath)) {
+            pendingUploads.delete(
+                uploadToken
+            );
+
+            return sendError(
+                res,
+                404,
+                'ไฟล์ชั่วคราวหาย กรุณาวิเคราะห์ใหม่'
+            );
+        }
+
+        try {
+            // เชื่อมต่อ Google Drive
+            const drive =
+                createDriveClient(req.user);
+
+            // หาโฟลเดอร์ตามหมวดหมู่
+            const folderId =
+                await getCategoryFolderId(
+                    drive,
+                    category
+                );
+
+            // =================================
+            // สร้างชื่อไฟล์อัตโนมัติ
+            // =================================
+
+            const driveFileName =
+                buildDriveFilename(
+                    category,
+                    pending.ocrText,
+                    pending.originalFileName
+                );
+
+            console.log(
+                '📄 ชื่อไฟล์เดิม:',
+                pending.originalFileName
+            );
+
+            console.log(
+                '✨ ชื่อไฟล์ใหม่:',
+                driveFileName
+            );
+
+            // =================================
+            // Upload ไฟล์ต้นฉบับ
+            // =================================
+
+            const uploaded =
+                await uploadToDrive(
+                    drive,
+                    {
+                        folderId,
+
+                        // ใช้ชื่อไฟล์ใหม่
+                        name: driveFileName,
+
+                        mimeType:
+                            pending.originalMimeType,
+
+                        // ใช้ไฟล์ต้นฉบับเดิม
+                        filePath:
+                            pending.filePath
+                    }
+                );
+
+            const userId =
+                pending.userId ||
+                req.user.dbUser?.id;
+
+            if (!userId) {
+                throw new Error(
+                    'ไม่พบ user_id ของผู้ใช้งาน'
+                );
+            }
+
+            const selected =
+                pending.categories.find(
+                    item =>
+                        item.name === category
+                );
+
+            const confidence =
+                selected
+                    ? Number(
+                        selected.percentage
+                    )
+                    : null;
+
+            // บันทึกประวัติลง MySQL
+            // original_name ยังคงเก็บชื่อเดิม
+            await saveUploadRecord({
+                userId,
+
+                fileName:
+                    pending.originalFileName,
+
+                category,
+
+                driveFileId:
+                    uploaded.id,
+
+                confidence
+            });
+
+            // ลบไฟล์ชั่วคราว
+            cleanupFile(
+                pending.filePath
+            );
+
+            pendingUploads.delete(
+                uploadToken
+            );
+
+            // ส่งผลลัพธ์กลับหน้าเว็บ
+            res.json({
+                success: true,
+                category,
+                confidence,
+
+                driveFileId:
+                    uploaded.id,
+
+                // ส่งชื่อใหม่กลับไปด้วย
+                fileName:
+                    uploaded.name ||
+                    driveFileName,
+
+                message:
+                    `จัดเก็บเอกสารเข้า Google Drive หมวด [${category}] เรียบร้อยแล้ว\n` +
+                    `ชื่อไฟล์: ${uploaded.name || driveFileName}`
+            });
+
+        } catch (error) {
+            console.error(
+                '❌ Upload Error:',
+                error
+            );
+
+            sendError(
+                res,
+                500,
+                'อัปโหลด Google Drive ไม่สำเร็จ',
+                error.message
+            );
+        }
     }
-
-    try {
-        const drive = createDriveClient(req.user);
-        const folderId = await getCategoryFolderId(drive, category);
-
-        const uploaded = await uploadToDrive(drive, {
-            folderId,
-            name: pending.originalFileName,
-            mimeType: pending.originalMimeType,
-            filePath: pending.filePath
-        });
-
-        const userId = pending.userId || req.user.dbUser?.id;
-
-        if (!userId) throw new Error('ไม่พบ user_id ของผู้ใช้งาน');
-
-        const selected = pending.categories.find(item => item.name === category);
-        const confidence = selected ? Number(selected.percentage) : null;
-
-        await saveUploadRecord({
-            userId,
-            fileName: pending.originalFileName,
-            category,
-            driveFileId: uploaded.id,
-            confidence
-        });
-
-        cleanupFile(pending.filePath);
-        pendingUploads.delete(uploadToken);
-
-        res.json({
-            success: true,
-            category,
-            confidence,
-            driveFileId: uploaded.id,
-            message: `จัดเก็บเอกสารเข้า Google Drive หมวด [${category}] เรียบร้อยแล้ว`
-        });
-    } catch (error) {
-        console.error('❌ Upload Error:', error);
-
-        sendError(res, 500, 'อัปโหลด Google Drive ไม่สำเร็จ', error.message);
-    }
-});
+);
 
 /* =====================================================
    CLEAN TEMP FILES
@@ -767,14 +1348,27 @@ app.post('/api/upload-selected-category', checkAuth, async (req, res) => {
 
 function startPendingSweeper() {
     setInterval(() => {
+
         const now = Date.now();
 
-        for (const [token, pending] of pendingUploads) {
-            if (now - pending.createdAt > PENDING_TTL) {
-                cleanupFile(pending.filePath);
-                pendingUploads.delete(token);
+        for (
+            const [token, pending]
+            of pendingUploads
+        ) {
+            if (
+                now - pending.createdAt >
+                PENDING_TTL
+            ) {
+                cleanupFile(
+                    pending.filePath
+                );
+
+                pendingUploads.delete(
+                    token
+                );
             }
         }
+
     }, PENDING_SWEEP_INTERVAL).unref();
 }
 
@@ -784,18 +1378,32 @@ function startPendingSweeper() {
 
 async function startServer() {
     try {
+        // ตรวจสอบฐานข้อมูล
         await assertDatabaseReady();
 
-        // เตรียม OCR ก่อนเปิด Server
+        // เตรียม OCR Workers
         await initOcrPool();
 
+        // ลบไฟล์ชั่วคราวที่หมดอายุ
         startPendingSweeper();
 
-        app.listen(PORT, '0.0.0.0', () =>
-            console.log(`🚀 Server รันอยู่ที่ port ${PORT}`)
+        // เปิด Server
+        app.listen(
+            PORT,
+            '0.0.0.0',
+            () => {
+                console.log(
+                    `🚀 Server รันอยู่ที่ port ${PORT}`
+                );
+            }
         );
+
     } catch (error) {
-        console.error('❌ Start Server Error:', error.message);
+        console.error(
+            '❌ Start Server Error:',
+            error.message
+        );
+
         process.exit(1);
     }
 }
