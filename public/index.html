@@ -26,9 +26,21 @@
     </div>
 
     <div class="topbar-right">
-        <span class="system-name">CPE Document AI</span>
-        <a href="/api/logout" class="btn-logout">ออกจากระบบ</a>
-    </div>
+    <span class="system-name">CPE Document AI</span>
+
+    <button
+        type="button"
+        id="adminMembersBtn"
+        class="btn-admin"
+        hidden
+    >
+        จัดการสมาชิก
+    </button>
+
+    <a href="/api/logout" class="btn-logout">
+        ออกจากระบบ
+    </a>
+</div>
 </header>
 
 
@@ -281,8 +293,74 @@
 
 </div>
 
+<!-- POPUP จัดการสมาชิก -->
+<div id="adminMembersPopup" class="custom-popup">
+    <div class="custom-popup-box admin-popup-box">
+
+        <div class="admin-popup-header">
+            <h3>จัดการสมาชิก</h3>
+
+            <button
+                type="button"
+                id="adminCloseBtn"
+                class="admin-close-btn"
+                aria-label="ปิด"
+            >
+                ×
+            </button>
+        </div>
+
+        <p>เพิ่มสมาชิกและกำหนดสิทธิ์การใช้งาน</p>
+
+        <div id="adminMessage" class="admin-message"></div>
+
+        <h4>เพิ่มสมาชิกใหม่</h4>
+
+        <div id="newMemberRows"></div>
+
+        <div class="admin-add-actions">
+            <button
+                type="button"
+                id="addMemberRowBtn"
+                class="admin-secondary-btn"
+            >
+                + เพิ่มช่องสมาชิก
+            </button>
+
+            <button
+                type="button"
+                id="saveMembersBtn"
+                class="popup-confirm"
+            >
+                บันทึกสมาชิก
+            </button>
+        </div>
+
+        <h4>สมาชิกในระบบ</h4>
+
+        <div class="admin-table-wrap">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>อีเมล</th>
+                        <th>Role</th>
+                        <th>จัดการ</th>
+                    </tr>
+                </thead>
+
+                <tbody id="adminMembersTable">
+                    <tr>
+                        <td colspan="3">กำลังโหลด...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>    
+</div>
+
 
 <script src="/js/index.js"></script>
+<script src="/js/admin-members.js"></script>
 
 </body>
 </html>

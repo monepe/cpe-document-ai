@@ -1591,3 +1591,57 @@ button {
 }
 
 }
+
+
+.admin-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.admin-table th,
+.admin-table td {
+    padding: 10px;
+    border-bottom: 1px solid #e4e7ec;
+    text-align: left;
+}
+
+.admin-table input {
+    width: 100%;
+    min-width: 180px;
+}
+
+.admin-table button {
+    padding: 8px 10px;
+    margin: 2px;
+    border: none;
+    border-radius: 7px;
+    background: #a30d1b;
+    color: white;
+}
+
+.admin-message {
+    margin-top: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    white-space: pre-wrap;
+}
+
+@media (max-width: 600px) {
+    .admin-member-row {
+        flex-wrap: wrap;
+    }
+
+    .admin-popup-box {
+        padding: 20px 14px;
+    }
+
+    .btn-admin {
+        padding: 7px 9px;
+        font-size: 10px;
+    }
+}
