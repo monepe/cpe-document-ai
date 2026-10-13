@@ -1644,4 +1644,39 @@ button {
         padding: 7px 9px;
         font-size: 10px;
     }
-}
+}/* Admin management: scoped overrides, preserve existing site */
+#adminMembersBtn{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:8px 15px;border:1px solid rgba(255,255,255,.55);border-radius:9px;background:rgba(255,255,255,.12);color:#fff;font:700 12px 'Sarabun',sans-serif;white-space:nowrap;cursor:pointer;transition:background .2s}
+#adminMembersBtn:hover{background:rgba(255,255,255,.24)}
+#adminMembersBtn[hidden]{display:none!important}
+#adminMembersPopup{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(16,32,58,.58);backdrop-filter:blur(4px)}
+#adminMembersPopup.show{display:flex}
+#adminMembersPopup .admin-popup-box{width:min(100%,800px);max-width:800px;max-height:min(90vh,900px);overflow-y:auto;margin:0;padding:28px 30px;background:#fff;border:1px solid #eaecf0;border-radius:20px;box-shadow:0 25px 70px rgba(16,24,40,.24);text-align:left}
+#adminMembersPopup .admin-popup-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+#adminMembersPopup .admin-popup-header h3{margin:0;color:#10203a;font-size:23px;font-weight:800}
+#adminMembersPopup .admin-close-btn{display:grid;place-items:center;flex:none;width:38px;height:38px;padding:0;border:0;border-radius:10px;background:#f2f4f7;color:#475467;font:500 26px Arial,sans-serif;cursor:pointer}
+#adminMembersPopup .admin-close-btn:hover{background:#fee4e2;color:#a30d1b}
+#adminMembersPopup .admin-popup-box>p{margin:0 0 20px;color:#667085;font-size:14px;text-align:left}
+#adminMembersPopup .admin-popup-box>h4{margin:23px 0 12px;color:#10203a;font-size:16px;font-weight:800;text-align:left}
+#adminMembersPopup .admin-member-row{display:grid;grid-template-columns:minmax(0,1fr) 125px 40px;align-items:center;gap:10px;margin:0 0 10px}
+#adminMembersPopup input,#adminMembersPopup select{width:100%;min-width:0;height:42px;padding:0 11px;border:1px solid #d0d5dd;border-radius:9px;outline:0;background:#fff;color:#172033;font:500 13px 'Sarabun',sans-serif}
+#adminMembersPopup input:focus,#adminMembersPopup select:focus{border-color:#a30d1b;box-shadow:0 0 0 3px rgba(163,13,27,.1)}
+#adminMembersPopup .admin-add-actions{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:10px;margin-top:12px}
+#adminMembersPopup .admin-secondary-btn{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:8px 14px;border:1px solid #d0d5dd;border-radius:9px;background:#fff;color:#344054;font:700 13px 'Sarabun',sans-serif;white-space:nowrap;cursor:pointer}
+#adminMembersPopup .admin-secondary-btn:hover{background:#f9fafb}
+#adminMembersPopup .admin-remove-row{width:40px;padding:0;color:#b42318;font-size:20px}
+#adminMembersPopup #saveMembersBtn{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:8px 17px;border:0;border-radius:9px;background:#a30d1b;color:#fff;font:700 13px 'Sarabun',sans-serif;white-space:nowrap;cursor:pointer}
+#adminMembersPopup #saveMembersBtn:hover{background:#780914}
+#adminMembersPopup .admin-table-wrap{width:100%;overflow-x:auto;border:1px solid #e4e7ec;border-radius:12px}
+#adminMembersPopup .admin-table{width:100%;min-width:540px;border-collapse:collapse;table-layout:fixed}
+#adminMembersPopup .admin-table th{padding:13px 12px;background:#f8fafc;color:#475467;font-size:13px;font-weight:800;text-align:left}
+#adminMembersPopup .admin-table td{padding:12px;border-top:1px solid #e4e7ec;vertical-align:middle;text-align:left}
+#adminMembersPopup .admin-table th:nth-child(1){width:46%}
+#adminMembersPopup .admin-table th:nth-child(2){width:20%}
+#adminMembersPopup .admin-table th:nth-child(3){width:34%}
+#adminMembersPopup .admin-table td input,#adminMembersPopup .admin-table td select{width:100%;min-width:0;height:40px}
+#adminMembersPopup .admin-table td button{display:inline-flex;align-items:center;justify-content:center;min-height:36px;margin:2px 4px 2px 0;padding:7px 12px;border:0;border-radius:8px;background:#a30d1b;color:#fff;font:700 12px 'Sarabun',sans-serif;white-space:nowrap;cursor:pointer}
+#adminMembersPopup .admin-table td .admin-delete-member{background:#fff1f1;color:#a30d1b}
+#adminMembersPopup .admin-table td .admin-delete-member:hover{background:#ffe4e6}
+#adminMembersPopup button:disabled,#adminMembersPopup select:disabled{opacity:.5;cursor:not-allowed}
+#adminMembersPopup .admin-message:not(:empty){margin:12px 0;padding:10px 13px;border-radius:9px;background:#f8fafc;line-height:1.6;white-space:pre-wrap}
+@media(max-width:600px){#adminMembersPopup{padding:10px}#adminMembersPopup .admin-popup-box{padding:20px 15px;border-radius:16px}#adminMembersPopup .admin-popup-header h3{font-size:20px}#adminMembersPopup .admin-member-row{grid-template-columns:minmax(0,1fr) 92px 36px;gap:6px}#adminMembersPopup .admin-remove-row{width:36px}#adminMembersPopup .admin-add-actions>button{flex:1}#adminMembersBtn{padding:7px 9px;font-size:11px}}
