@@ -106,6 +106,78 @@ module.exports = ({app, db, groq, checkAuth, getUserEmail, findUserByEmail, crea
         [req.workloadUserId]
       );
       const terms = tokenize(question);
+      const categoryAliases = [
+  { name: CATEGORIES[0], words: ['บริการวิชาการ'] },
+  { name: CATEGORIES[1], words: ['ทำนุบำรุง', 'ศิลปวัฒนธรรม'] },
+  { name: CATEGORIES[2], words: ['ผลงานทางวิชาการ'] },
+  { name: CATEGORIES[3], words: ['พัฒนานักศึกษา'] },
+  { name: CATEGORIES[4], words: ['อื่นๆ', 'อื่น ๆ'] }
+];
+
+const matched = categoryAliases.filter(item =>
+  item.words.some(word => question.includes(word))
+);
+
+// ถ้าถามหมวดเดียว ให้ค้นเฉพาะหมวดนั้น
+if (matched.length === 1) {
+  const category = matched[0].name;
+
+  // คำถามเกี่ยวกับจำนวนเอกสาร
+  if (/กี่ไฟล์|กี่เอกสาร|กี่รายการ|จำนวน|มีกี่/.test(question)) {
+    const [counts] = await db.execute(
+      'SELECT COUNT(*) AS total FROM files WHERE user_id = ? AND category = ?',
+      [req.workloadUserId, category]
+    );
+
+    const [docs] = await db.execute(
+      `SELECT original_name, category, drive_file_id
+       FROM files
+       WHERE user_id = ? AND category = ?
+       ORDER BY id DESC LIMIT 1000`,
+      [req.workloadUserId, category]
+    );
+
+    return res.json({
+      success: true,
+      answer: `หมวด ${category} มีเอกสาร ${Number(counts[0]?.total || 0)} ไฟล์`,
+      sources: docs.map((r, i) => ({
+        ref: i + 1,
+        name: r.original_name,
+        category: r.category,
+        url: driveUrl(r.drive_file_id)
+      }))
+    });
+  }
+
+  // คำถามขอรายชื่อเอกสาร
+  if (/มีไฟล์|ไฟล์อะไร|เอกสารอะไร|รายชื่อ|รายการ|มีเอกสาร/.test(question)) {
+    const [docs] = await db.execute(
+      `SELECT original_name, category, drive_file_id
+       FROM files
+       WHERE user_id = ? AND category = ?
+       ORDER BY id DESC LIMIT 1000`,
+      [req.workloadUserId, category]
+    );
+
+    return res.json({
+      success: true,
+      answer: docs.length
+        ? `เอกสารหมวด ${category} ที่พบ:\n` +
+          docs.map((r, i) => `${i + 1}. ${r.original_name}`).join('\n')
+        : `ไม่พบเอกสารหมวด ${category}`,
+      sources: docs.map((r, i) => ({
+        ref: i + 1,
+        name: r.original_name,
+        category: r.category,
+        url: driveUrl(r.drive_file_id)
+      }))
+    });
+  }
+
+  // คำถามเกี่ยวกับเนื้อหา: จำกัดการค้นหา OCR เฉพาะหมวดนี้
+  const filteredRows = rows.filter(r => r.category === category);
+  rows.splice(0, rows.length, ...filteredRows);
+}
       const ranked = rows.map(r => {
         const hay = `${r.original_name} ${r.category} ${r.ocr_text}`.toLowerCase();
         const score = terms.reduce((sum, term) => sum + (hay.includes(term) ? 1 : 0), 0);
