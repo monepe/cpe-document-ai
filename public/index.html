@@ -46,6 +46,14 @@
 
 <main class="page">
 
+    <!-- เมนูหลัก: คงหน้าอัปโหลดเป็นหน้าแรก -->
+    <nav class="cpe-nav" aria-label="เมนูหลัก">
+      <button type="button" class="cpe-nav-btn active" data-view="upload" aria-current="page">⬆ อัปโหลดเอกสาร</button>
+      <button type="button" class="cpe-nav-btn" data-view="dashboard">▦ Dashboard</button>
+      <button type="button" class="cpe-nav-btn" data-view="portfolio">▤ แฟ้มผลงาน</button>
+    </nav>
+
+    <div id="uploadView" class="cpe-view">
     <!-- HERO -->
     <section class="dashboard-hero">
 
@@ -204,24 +212,19 @@
 
 
 
-    <!-- PERSONAL WORKLOAD -->
-    <section id="workloadSection" class="workload-section" aria-label="ภาระงานของฉัน">
-        <div class="panel-title"><span class="step">3</span><h3>สรุปภาระงานของฉัน</h3></div>
-        <p>แสดงเฉพาะเอกสารของบัญชีที่เข้าสู่ระบบ</p>
-        <button id="refreshWorkloadBtn" type="button">อัปเดตข้อมูล</button>
-        <div id="workloadSummary" aria-live="polite">กำลังโหลดข้อมูล...</div>
+    </div><!-- /uploadView -->
 
-        <div class="panel-title"><span class="step">4</span><h3>Ask My Workload</h3></div>
-        <label for="workloadQuestion">ถาม AI เกี่ยวกับเอกสารของคุณ</label>
-        <textarea id="workloadQuestion" rows="3" placeholder="เช่น มีคำสั่งเกี่ยวกับพัฒนานักศึกษาอะไรบ้าง?"></textarea>
-        <button id="askWorkloadBtn" type="button">ถาม AI</button>
-        <div id="workloadAnswer" aria-live="polite"></div>
-        <div id="workloadSources"></div>
+    <section id="dashboardView" class="cpe-view cpe-subpage" hidden aria-label="Dashboard">
+      <div class="cpe-page-heading"><div><span class="cpe-eyebrow">MY WORKLOAD</span><h2>ภาพรวมภาระงาน</h2><p>เปรียบเทียบเอกสารของฉันกับไฟล์ที่เข้าถึงได้ใน Google Drive</p></div>
+      <button id="refreshWorkloadBtn" type="button" class="cpe-primary-btn">↻ อัปเดตข้อมูล</button></div>
+      <div class="cpe-dashboard-intro"><span>📊</span><div><strong>สรุปจำนวนเอกสารตามหมวดหมู่</strong><p>เอกสารของฉันนับตามบัญชีที่เข้าสู่ระบบ ส่วน Google Drive อาจรวมไฟล์ที่แชร์ให้</p></div></div>
+      <div id="workloadSummary" aria-live="polite">กำลังโหลดข้อมูล...</div>
+    </section>
 
-        <div class="panel-title"><span class="step">5</span><h3>Evidence Portfolio</h3></div>
-        <button id="loadWorkloadDocumentsBtn" type="button">แสดงหลักฐานของฉัน</button>
-        <a href="/api/workload/report.csv">ดาวน์โหลดรายงาน CSV</a>
-        <div id="workloadDocuments"></div>
+    <section id="portfolioView" class="cpe-view cpe-subpage" hidden aria-label="แฟ้มผลงาน">
+      <div class="cpe-page-heading"><div><span class="cpe-eyebrow">EVIDENCE PORTFOLIO</span><h2>แฟ้มผลงานของฉัน</h2><p>เปิดหลักฐานจาก Google Drive และส่งออกรายงาน CSV</p></div>
+      <div class="cpe-heading-actions"><button id="loadWorkloadDocumentsBtn" type="button" class="cpe-primary-btn">↻ โหลดเอกสาร</button><a class="cpe-outline-btn" href="/api/workload/report.csv">↓ ดาวน์โหลด CSV</a></div></div>
+      <div id="workloadDocuments" aria-live="polite">กด “โหลดเอกสาร” เพื่อดูหลักฐานของคุณ</div>
     </section>
 
 </main>
@@ -380,6 +383,22 @@
     </div>    
 </div>
 
+
+<!-- ปุ่ม AI Chatbot มุมขวาล่าง -->
+<div class="cpe-chat-widget">
+  <section id="cpeChatPanel" class="cpe-chat-panel" role="dialog" aria-modal="false" aria-label="ผู้ช่วย AI ภาระงาน" hidden>
+    <div class="cpe-chat-header"><div class="cpe-chat-avatar">✦</div><div><strong>ผู้ช่วย AI ภาระงาน</strong><small>ค้นหาคำตอบจากเอกสารของฉัน</small></div><button id="cpeChatClose" type="button" aria-label="ปิดแชท">×</button></div>
+    <div class="cpe-chat-content" id="cpeChatContent">
+      <div class="cpe-chat-greeting">สวัสดีครับ 👋<br>ลองถามเกี่ยวกับเอกสารภาระงานที่เคยบันทึกไว้ได้เลย</div>
+      <div id="workloadAnswer" aria-live="polite"></div>
+      <div id="workloadSources"></div>
+    </div>
+    <div class="cpe-chat-compose"><label class="cpe-sr-only" for="workloadQuestion">คำถามถึง AI</label><textarea id="workloadQuestion" rows="2" placeholder="พิมพ์คำถามเกี่ยวกับภาระงาน..."></textarea><button id="askWorkloadBtn" type="button">ส่ง ➤</button></div>
+    <small class="cpe-chat-hint">Enter เพื่อส่ง · Shift + Enter เพื่อขึ้นบรรทัดใหม่</small>
+  </section>
+  <button id="cpeChatToggle" class="cpe-chat-toggle" type="button" aria-label="เปิดผู้ช่วย AI" aria-controls="cpeChatPanel" aria-expanded="false">☏ <span>ถาม AI</span></button>
+</div>
+<script src="/js/cpe-ui.js"></script>
 
 <script src="/js/index.js"></script>
 <script src="/js/admin-members.js"></script>
