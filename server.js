@@ -1704,6 +1704,16 @@ app.post(
     }
 );
 
+require('./workload-routes')({
+    app,
+    db,
+    groq,
+    checkAuth,
+    getUserEmail,
+    findUserByEmail
+});
+
+
 // =====================================================
 // CLEAN EXPIRED TEMP FILES
 // =====================================================
