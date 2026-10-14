@@ -1710,7 +1710,11 @@ require('./workload-routes')({
     groq,
     checkAuth,
     getUserEmail,
-    findUserByEmail
+    findUserByEmail,
+    createDriveClient,
+    findDriveFolder,
+    APP_DRIVE_FOLDER,
+    CATEGORIES
 });
 
 
