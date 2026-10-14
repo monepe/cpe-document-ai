@@ -202,6 +202,28 @@
 
     </section>
 
+
+
+    <!-- PERSONAL WORKLOAD -->
+    <section id="workloadSection" class="workload-section" aria-label="ภาระงานของฉัน">
+        <div class="panel-title"><span class="step">3</span><h3>สรุปภาระงานของฉัน</h3></div>
+        <p>แสดงเฉพาะเอกสารของบัญชีที่เข้าสู่ระบบ</p>
+        <button id="refreshWorkloadBtn" type="button">อัปเดตข้อมูล</button>
+        <div id="workloadSummary" aria-live="polite">กำลังโหลดข้อมูล...</div>
+
+        <div class="panel-title"><span class="step">4</span><h3>Ask My Workload</h3></div>
+        <label for="workloadQuestion">ถาม AI เกี่ยวกับเอกสารของคุณ</label>
+        <textarea id="workloadQuestion" rows="3" placeholder="เช่น มีคำสั่งเกี่ยวกับพัฒนานักศึกษาอะไรบ้าง?"></textarea>
+        <button id="askWorkloadBtn" type="button">ถาม AI</button>
+        <div id="workloadAnswer" aria-live="polite"></div>
+        <div id="workloadSources"></div>
+
+        <div class="panel-title"><span class="step">5</span><h3>Evidence Portfolio</h3></div>
+        <button id="loadWorkloadDocumentsBtn" type="button">แสดงหลักฐานของฉัน</button>
+        <a href="/api/workload/report.csv">ดาวน์โหลดรายงาน CSV</a>
+        <div id="workloadDocuments"></div>
+    </section>
+
 </main>
 
 
@@ -361,6 +383,7 @@
 
 <script src="/js/index.js"></script>
 <script src="/js/admin-members.js"></script>
+<script src="/js/workload.js"></script>
 
 </body>
 </html>

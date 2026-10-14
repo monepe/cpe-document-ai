@@ -758,24 +758,37 @@ async function saveUploadRecord({
     fileName,
     category,
     driveFileId,
-    confidence
+    confidence,
+    ocrText
 }) {
     const connection = await db.getConnection();
 
     try {
         await connection.beginTransaction();
 
-        await connection.execute(
+        const [fileResult] = await connection.execute(
             `INSERT INTO files
-             (user_id, original_name, category,
-              drive_file_id, created_at)
-             VALUES (?, ?, ?, ?, ${NOW_TH})`,
-            [
-                userId,
-                fileName,
-                category,
-                driveFileId
-            ]
+            (user_id, original_name, category,
+            drive_file_id, created_at)
+            VALUES (?, ?, ?, ?, ${NOW_TH})`,
+        [
+            userId,
+            fileName,
+            category,
+            driveFileId
+        ]
+        );
+
+    // บันทึกข้อความ OCR สำหรับ AI Chatbot
+    await connection.execute(
+            `INSERT INTO document_texts
+            (file_id, user_id, ocr_text)
+            VALUES (?, ?, ?)`,
+        [
+            fileResult.insertId,
+            userId,
+            String(ocrText || '')
+        ]
         );
 
         await connection.execute(
@@ -1657,7 +1670,8 @@ app.post(
                 fileName: pending.originalFileName,
                 category,
                 driveFileId: uploaded.id,
-                confidence
+                confidence,
+                ocrText: pending.ocrText
             });
 
             cleanupFile(pending.filePath);
