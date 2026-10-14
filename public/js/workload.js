@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
 
             const data = await getJson(
-                '/api/workload/dashboard'
+                '/api/workload/drive-dashboard'
             );
 
             box.replaceChildren();
@@ -47,9 +47,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const total = document.createElement('h3');
 
             total.textContent =
-                `เอกสารทั้งหมด: ${data.total} ไฟล์`;
+                `เอกสารใน Google Drive: ${data.total} ไฟล์`;
 
             box.appendChild(total);
+
+            const note = document.createElement('p');
+            note.textContent = data.note || 'นับไฟล์จาก Google Drive ที่บัญชีปัจจุบันเข้าถึงได้';
+            box.appendChild(note);
 
             for (const item of data.categories || []) {
 
