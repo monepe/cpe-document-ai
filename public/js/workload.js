@@ -51,10 +51,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             box.appendChild(total);
 
-            const note = document.createElement('p');
-            note.textContent = data.note || 'นับไฟล์จาก Google Drive ที่บัญชีปัจจุบันเข้าถึงได้';
-            box.appendChild(note);
-
             for (const item of data.categories || []) {
 
                 const row = document.createElement('p');
