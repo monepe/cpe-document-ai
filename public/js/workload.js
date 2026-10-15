@@ -136,6 +136,148 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+
+    // ==========================================
+    // Export Dashboard to print-ready PDF with clickable Drive links
+    // ==========================================
+    async function exportDashboardPdf() {
+        const button = $('exportDashboardPdfBtn');
+        // Open immediately on user click to avoid popup blockers.
+        const preview = window.open('', '_blank');
+        if (!preview) {
+            alert('กรุณาอนุญาต Pop-ups สำหรับเว็บไซต์นี้ เพื่อเปิดหน้าบันทึก PDF');
+            return;
+        }
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'กำลังรวบรวมไฟล์...';
+        }
+
+        const doc = preview.document;
+        doc.title = 'รายงานสรุปภาระงาน - CPE Document AI';
+        doc.documentElement.lang = 'th';
+        doc.head.replaceChildren();
+        const meta = doc.createElement('meta');
+        meta.setAttribute('charset', 'utf-8');
+        doc.head.appendChild(meta);
+        const style = doc.createElement('style');
+        style.textContent = `
+            @page { size: A4; margin: 16mm 14mm; }
+            body { font-family: "Sarabun", "Noto Sans Thai", Tahoma, Arial, sans-serif;
+                   color:#16213a; font-size:12px; line-height:1.6; margin:24px; }
+            h1 { color:#990b1a; font-size:22px; margin-bottom:3px; }
+            h2 { color:#990b1a; font-size:16px; margin:22px 0 6px; }
+            .sub { color:#53637b; }
+            .summary { border:1px solid #dedede; padding:12px; margin:14px 0; }
+            .file { padding:6px 0; border-bottom:1px solid #e5e7eb; overflow-wrap:anywhere; }
+            a { color:#a30a1d; text-decoration:underline; }
+            .tools { margin:12px 0 22px; }
+            .tools button { background:#a30a1d; color:white; border:0; padding:11px 20px;
+                            border-radius:8px; cursor:pointer; font:inherit; }
+            .hint { color:#586276; font-size:11px; }
+            section { break-inside:avoid-page; }
+            @media print {
+                body { margin:0; }
+                .tools { display:none; }
+                a { color:#a30a1d; }
+                .file { break-inside:avoid; }
+            }`;
+        doc.head.appendChild(style);
+        doc.body.replaceChildren();
+        const status = doc.createElement('p');
+        status.textContent = 'กำลังดึงรายชื่อไฟล์ทั้งหมดจาก Google Drive กรุณารอสักครู่...';
+        doc.body.appendChild(status);
+
+        const el = (tag, text, parent, cls) => {
+            const node = doc.createElement(tag);
+            if (text !== undefined) node.textContent = String(text);
+            if (cls) node.className = cls;
+            parent.appendChild(node);
+            return node;
+        };
+
+        try {
+            const dashboard = await getJson('/api/workload/drive-dashboard');
+            const groups = [];
+            for (const category of dashboard.categories || []) {
+                const files = [];
+                let token = null;
+                let pages = 0;
+                do {
+                    const params = new URLSearchParams({ category: category.name });
+                    if (token) params.set('pageToken', token);
+                    const data = await getJson(`/api/workload/drive-category-files?${params}`);
+                    files.push(...(data.files || []));
+                    token = data.nextPageToken || null;
+                    pages++;
+                    if (pages > 100) throw new Error('รายการไฟล์มากเกินขอบเขตที่กำหนด กรุณาติดต่อผู้ดูแลระบบ');
+                } while (token);
+                groups.push({ name: category.name, files });
+            }
+
+            doc.body.replaceChildren();
+            el('h1', 'รายงานสรุปภาระงาน', doc.body);
+            el('p', 'CPE Document AI — รายการหลักฐานจาก Google Drive', doc.body, 'sub');
+            el('p', 'วันที่จัดทำรายงาน: ' + new Date().toLocaleString('th-TH'), doc.body, 'sub');
+            const count = groups.reduce((sum, group) => sum + group.files.length, 0);
+            el('div', `เอกสารทั้งหมด ${count} ไฟล์ | ${groups.length} หมวดหมู่`, doc.body, 'summary');
+
+            const tools = el('div', undefined, doc.body, 'tools');
+            const print = el('button', 'บันทึกเป็น PDF / พิมพ์รายงาน', tools);
+            print.type = 'button';
+            print.addEventListener('click', () => preview.print());
+            el('p', 'เลือกปลายทาง “Save as PDF / บันทึกเป็น PDF” ในหน้าต่างพิมพ์ของเบราว์เซอร์', tools, 'hint');
+
+            for (const group of groups) {
+                const section = el('section', undefined, doc.body);
+                el('h2', `${group.name} (${group.files.length} ไฟล์)`, section);
+                if (!group.files.length) {
+                    el('p', 'ไม่มีไฟล์ในหมวดหมู่นี้', section, 'sub');
+                    continue;
+                }
+                group.files.forEach((file, i) => {
+                    const line = el('div', undefined, section, 'file');
+                    el('span', `${i + 1}. `, line);
+                    if (file.url && /^https:\/\/(?:drive\.google\.com|docs\.google\.com)\//i.test(file.url)) {
+                        const link = el('a', file.name || 'ไม่มีชื่อไฟล์', line);
+                        link.href = file.url;
+                        link.target = '_blank';
+                        link.rel = 'noopener noreferrer';
+                    } else {
+                        el('span', (file.name || 'ไม่มีชื่อไฟล์') + ' (ไม่มีลิงก์)', line);
+                    }
+                });
+            }
+            el('p', 'กดชื่อไฟล์ใน PDF เพื่อเปิดหลักฐานบน Google Drive (ต้องมีสิทธิ์เข้าถึงไฟล์)', doc.body, 'hint');
+            if (count !== Number(dashboard.total)) {
+                el('p', 'หมายเหตุ: จำนวนไฟล์ที่อ่านได้อาจเปลี่ยนระหว่างจัดทำรายงาน', doc.body, 'hint');
+            }
+            preview.focus();
+        } catch (error) {
+            status.textContent = `ไม่สามารถจัดทำรายงานได้: ${error.message}`;
+            status.style.color = '#a30a1d';
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = 'บันทึกรายงาน PDF';
+            }
+        }
+    }
+
+    function addDashboardPdfButton() {
+        const summary = $('workloadSummary');
+        if (!summary || $('exportDashboardPdfBtn')) return;
+        const button = document.createElement('button');
+        button.id = 'exportDashboardPdfBtn';
+        button.type = 'button';
+        button.textContent = 'บันทึกรายงาน PDF';
+        button.style.cssText = 'background:#a30a1d;color:#fff;border:0;border-radius:9px;padding:11px 18px;cursor:pointer;font:inherit;font-weight:600;margin:0 0 12px;';
+        button.addEventListener('click', exportDashboardPdf);
+        summary.parentElement.insertBefore(button, summary);
+    }
+
+    addDashboardPdfButton();
+
     // ==========================================
     // 2. ASK MY WORKLOAD
     // ==========================================
