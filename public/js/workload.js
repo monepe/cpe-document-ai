@@ -52,13 +52,82 @@ document.addEventListener('DOMContentLoaded', () => {
             box.appendChild(total);
 
             for (const item of data.categories || []) {
+                const section = document.createElement('div');
+                section.style.cssText = 'border-bottom:1px solid #e2e6eb;padding:9px 0;';
 
-                const row = document.createElement('p');
+                const toggle = document.createElement('button');
+                toggle.type = 'button';
+                toggle.setAttribute('aria-expanded', 'false');
+                toggle.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;padding:8px 0;font:inherit;';
+                const title = document.createElement('span');
+                title.textContent = `📁 ${item.name}: ${item.count} ไฟล์`;
+                const arrow = document.createElement('span');
+                arrow.textContent = '⌄';
+                toggle.append(title, arrow);
 
-                row.textContent =
-                    `${item.name}: ${item.count} ไฟล์`;
+                const details = document.createElement('div');
+                details.hidden = true;
+                details.style.cssText = 'padding:8px 0 8px 22px;';
+                let loaded = false;
+                let nextPageToken = null;
 
-                box.appendChild(row);
+                async function fetchFiles(append = false) {
+                    if (!append) details.textContent = 'กำลังโหลดรายชื่อไฟล์จาก Google Drive...';
+                    try {
+                        const params = new URLSearchParams({category: item.name});
+                        if (append && nextPageToken) params.set('pageToken', nextPageToken);
+                        const result = await getJson(`/api/workload/drive-category-files?${params}`);
+                        if (!append) details.replaceChildren();
+                        if (!append && !result.files?.length) {
+                            details.textContent = 'ไม่มีไฟล์ในหมวดหมู่นี้';
+                        }
+                        for (const file of result.files || []) {
+                            const line = document.createElement('div');
+                            line.style.cssText = 'padding:7px 0;overflow-wrap:anywhere;';
+                            if (file.url && /^https:\/\//i.test(file.url)) {
+                                const link = document.createElement('a');
+                                link.href = file.url;
+                                link.target = '_blank';
+                                link.rel = 'noopener noreferrer';
+                                link.textContent = `📄 ${file.name} ↗`;
+                                link.style.color = '#aa0a1d';
+                                line.appendChild(link);
+                            } else {
+                                line.textContent = `📄 ${file.name} (ไม่มีลิงก์เปิดไฟล์)`;
+                            }
+                            details.appendChild(line);
+                        }
+                        nextPageToken = result.nextPageToken || null;
+                        loaded = true;
+                        details.querySelector('.drive-more-files')?.remove();
+                        if (nextPageToken) {
+                            const more = document.createElement('button');
+                            more.type = 'button';
+                            more.className = 'drive-more-files';
+                            more.textContent = 'โหลดไฟล์เพิ่มเติม';
+                            more.style.cssText = 'padding:7px 12px;margin-top:8px;cursor:pointer;';
+                            more.addEventListener('click', async () => {
+                                more.disabled = true;
+                                await fetchFiles(true);
+                                more.disabled = false;
+                            });
+                            details.appendChild(more);
+                        }
+                    } catch (error) {
+                        const message = document.createElement('p');
+                        message.textContent = `โหลดไฟล์ไม่สำเร็จ: ${error.message}`;
+                        details.appendChild(message);
+                    }
+                }
+
+                toggle.addEventListener('click', () => {
+                    details.hidden = !details.hidden;
+                    toggle.setAttribute('aria-expanded', String(!details.hidden));
+                    arrow.textContent = details.hidden ? '⌄' : '⌃';
+                    if (!details.hidden && !loaded) fetchFiles();
+                });
+                section.append(toggle, details);
+                box.appendChild(section);
             }
 
         } catch (error) {

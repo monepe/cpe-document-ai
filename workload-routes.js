@@ -70,6 +70,42 @@ module.exports = ({app, db, groq, checkAuth, getUserEmail, findUserByEmail, crea
       next(e);
     }
   });
+  // List files inside a selected Google Drive category folder (same source as dashboard counts).
+  router.get('/drive-category-files', async (req, res, next) => {
+    try {
+      const category = String(req.query.category || '');
+      if (!DRIVE_CATEGORIES.includes(category)) {
+        return res.status(400).json({error:'หมวดหมู่ไม่ถูกต้อง'});
+      }
+      const pageToken = String(req.query.pageToken || '');
+      if (pageToken.length > 2000) return res.status(400).json({error:'ข้อมูลหน้าถัดไปไม่ถูกต้อง'});
+      const drive = createDriveClient(req.user);
+      const configuredId = String(process.env.GOOGLE_DRIVE_MAIN_FOLDER_ID || '').trim();
+      const main = configuredId ? {id: configuredId} : await findDriveFolder(drive, APP_DRIVE_FOLDER, null);
+      if (!main) return res.json({success:true, files:[], nextPageToken:null});
+      const folder = await findDriveFolder(drive, category, main.id);
+      if (!folder) return res.json({success:true, files:[], nextPageToken:null});
+      const escapeQuery = value => String(value).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+      const response = await drive.files.list({
+        q: `'${escapeQuery(folder.id)}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`,
+        fields: 'nextPageToken,files(id,name,mimeType,webViewLink)',
+        pageSize: 1000,
+        ...(pageToken ? {pageToken} : {}),
+        spaces: 'drive'
+      });
+      const files = (response.data.files || []).map(file => ({
+        id: file.id,
+        name: file.name || 'ไม่มีชื่อไฟล์',
+        mimeType: file.mimeType || '',
+        url: /^https:\/\//i.test(file.webViewLink || '') ? file.webViewLink : driveUrl(file.id)
+      }));
+      res.json({success:true, files, nextPageToken:response.data.nextPageToken || null});
+    } catch (e) {
+      const status = Number(e?.code || e?.response?.status);
+      if ([401,403,404].includes(status)) return res.status(403).json({error:'ไม่สามารถอ่านไฟล์ Google Drive ได้ กรุณาตรวจสอบสิทธิ์บัญชี Google'});
+      next(e);
+    }
+  });
   router.get('/documents', async (req, res, next) => {
     try {
       const [rows] = await db.execute(
