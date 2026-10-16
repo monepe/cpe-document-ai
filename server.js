@@ -27,6 +27,8 @@ const execFileAsync = promisify(execFile);
 const env = process.env;
 const PORT = Number(env.PORT) || 3000;
 const IS_PRODUCTION = env.NODE_ENV === 'production';
+// Enable only while collecting OCR evidence for a test document.
+const DEBUG_OCR_TEXT = env.DEBUG_OCR_TEXT === 'true';
 
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -1447,6 +1449,23 @@ app.use(express.static(PUBLIC_DIR));
 // API — CLASSIFY DOCUMENT
 // =====================================================
 
+// Displays exactly the text passed to AI, without changing the API response.
+function logOcrEvidence(file, text) {
+    if (!DEBUG_OCR_TEXT) return;
+    const evidenceId = crypto.randomUUID();
+    console.log([
+        '===== OCR EVIDENCE BEGIN =====',
+        `Evidence ID: ${evidenceId}`,
+        `Timestamp: ${new Date().toISOString()}`,
+        `File: ${file.originalname}`,
+        `MIME: ${file.mimetype}`,
+        `Characters: ${text.length}`,
+        '===== TEXT SENT TO AI =====',
+        text,
+        '===== OCR EVIDENCE END ====='
+    ].join('\n'));
+}
+
 app.post(
     '/api/classify',
     checkAuth,
@@ -1495,6 +1514,8 @@ app.post(
                     'ไม่พบข้อความในเอกสาร'
                 );
             }
+
+            logOcrEvidence(req.file, trimmedText);
 
             // ส่งข้อความจากทุกหน้าที่อ่านได้ให้ AI
             const {
